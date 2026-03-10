@@ -1,0 +1,15 @@
+{
+  "name": "cursor-claw",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node feishu-cursor.js",
+    "dev": "node --watch feishu-cursor.js",
+    "test": "node --test test/app-commands.test.js test/cursor-bridge.test.js test/cursor-events.test.js"
+  },
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.32.0",
+    "cron": "^4.4.0",
+    "dotenv": "^16.6.1"
+  }
+}
