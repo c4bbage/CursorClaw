@@ -151,7 +151,30 @@ export class FeishuAdapter extends ChannelAdapter {
       }
     });
 
-    // 监听所有事件
+    eventDispatcher.register({
+      'application.bot.menu_v6': async (data) => {
+        console.log('[Feishu] Bot menu event:', JSON.stringify(data, null, 2));
+        const eventKey = data.event_key || data.event?.event_key;
+        const operator = data.operator || data.event?.operator;
+        if (!eventKey || !operator) {
+          console.warn('[Feishu] Menu event missing event_key or operator');
+          return;
+        }
+        const userId = operator.operator_id?.open_id || operator.operator_id?.user_id;
+        if (!userId) return;
+
+        this.emitMessage({
+          userKey: userId,
+          conversationKey: userId,
+          messageKey: `menu_${Date.now()}`,
+          messageType: 'text',
+          text: `/${eventKey}`,
+          attachments: [],
+          raw: data
+        });
+      }
+    });
+
     eventDispatcher.register({
       '*': (data) => {
         console.log('[Feishu] Event received:', data.header?.event_type);

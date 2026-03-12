@@ -1,4 +1,4 @@
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { AppResponseAccumulator } from './app-commands.js';
 import { AppCommandExecutor, composeFinalText } from './app-command-executor.js';
 import {
@@ -11,6 +11,15 @@ import {
   formatTaskMessage,
   formatTodosMessage
 } from './cursor-events.js';
+
+export const BOT_COMMANDS = [
+  { command: 'help',   description: '显示可用命令 / Show available commands' },
+  { command: 'cancel', description: '取消当前任务 / Cancel current task' },
+  { command: 'status', description: '查看会话状态 / Show session status' },
+  { command: 'memory', description: '查看项目记忆 / Show project memory' },
+  { command: 'clear',  description: '重置会话 / Reset session' },
+  { command: 'tasks',  description: '查看定时任务 / List scheduled tasks' },
+];
 
 export class BridgeController {
   constructor({ channelAdapter, cursorSessions, scheduler }) {
@@ -62,13 +71,10 @@ export class BridgeController {
       });
     });
 
-    if (message.text?.trim() === '/cancel') {
-      const cancelled = this.cursorSessions.cancelPrompt(message.scopeKey);
-      const reply = cancelled
-        ? '已发送取消请求，当前任务将中断。'
-        : '当前没有正在执行的任务。';
-      await this.channelAdapter.replyText(message, reply);
-      return;
+    const cmdMatch = message.text?.trim().match(/^\/(\w+)/);
+    if (cmdMatch) {
+      const handled = await this.handleCommand(cmdMatch[1], message);
+      if (handled) return;
     }
 
     if (await this.handlePendingInteraction(message)) {
@@ -224,5 +230,117 @@ export class BridgeController {
     }
 
     this.acknowledgeCursorEvent(scopeKey, event);
+  }
+
+  async handleCommand(cmd, message) {
+    switch (cmd) {
+      case 'help':
+        return this.cmdHelp(message);
+      case 'cancel':
+        return this.cmdCancel(message);
+      case 'status':
+        return this.cmdStatus(message);
+      case 'memory':
+        return this.cmdMemory(message);
+      case 'clear':
+        return this.cmdClear(message);
+      case 'tasks':
+        return this.cmdTasks(message);
+      default:
+        return false;
+    }
+  }
+
+  async cmdHelp(message) {
+    const lines = ['📋 可用命令 / Available Commands\n'];
+    for (const { command, description } of BOT_COMMANDS) {
+      lines.push(`/${command} — ${description}`);
+    }
+    await this.channelAdapter.replyText(message, lines.join('\n'));
+    return true;
+  }
+
+  async cmdCancel(message) {
+    const cancelled = this.cursorSessions.cancelPrompt(message.scopeKey);
+    const reply = cancelled
+      ? '已发送取消请求，当前任务将中断。'
+      : '当前没有正在执行的任务。';
+    await this.channelAdapter.replyText(message, reply);
+    return true;
+  }
+
+  async cmdStatus(message) {
+    const session = this.cursorSessions.sessions.get(message.scopeKey);
+    if (!session) {
+      await this.channelAdapter.replyText(message, '当前没有活跃会话。');
+      return true;
+    }
+    const uptime = Math.round((Date.now() - session.createdAt) / 1000);
+    const idle = Math.round((Date.now() - session.lastUsedAt) / 1000);
+    const hasPending = this.pendingInteractions.has(message.scopeKey);
+    const lines = [
+      '📊 Session Status\n',
+      `scope: ${message.scopeKey}`,
+      `uptime: ${uptime}s`,
+      `idle: ${idle}s`,
+      `pending interaction: ${hasPending ? 'yes' : 'no'}`,
+      `session id: ${session.bridge?.sessionId || 'N/A'}`,
+    ];
+    await this.channelAdapter.replyText(message, lines.join('\n'));
+    return true;
+  }
+
+  async cmdMemory(message) {
+    const memoryPath = `${process.cwd()}/memory/MEMORY.md`;
+    const today = new Date().toISOString().slice(0, 10);
+    const dailyPath = `${process.cwd()}/memory/${today}.md`;
+
+    const parts = [];
+
+    if (existsSync(memoryPath)) {
+      const content = readFileSync(memoryPath, 'utf-8');
+      const preview = content.length > 1500
+        ? content.slice(0, 1500) + '\n\n[... 已截断]'
+        : content;
+      parts.push('📝 Long-Term Memory (MEMORY.md)\n\n' + preview);
+    } else {
+      parts.push('📝 MEMORY.md 不存在。');
+    }
+
+    if (existsSync(dailyPath)) {
+      const content = readFileSync(dailyPath, 'utf-8');
+      const preview = content.length > 1000
+        ? content.slice(-1000)
+        : content;
+      parts.push(`\n📅 Today (${today})\n\n` + preview);
+    }
+
+    await this.channelAdapter.replyText(message, parts.join('\n') || '没有找到记忆文件。');
+    return true;
+  }
+
+  async cmdClear(message) {
+    const destroyed = await this.cursorSessions.destroySession(message.scopeKey);
+    this.pendingInteractions.delete(message.scopeKey);
+    this.latestTargets.delete(message.scopeKey);
+    const reply = destroyed
+      ? '会话已重置，下次发消息将创建新会话。'
+      : '当前没有活跃会话。';
+    await this.channelAdapter.replyText(message, reply);
+    return true;
+  }
+
+  async cmdTasks(message) {
+    const taskList = this.scheduler.list();
+    if (taskList.length === 0) {
+      await this.channelAdapter.replyText(message, '当前没有定时任务。');
+      return true;
+    }
+    const lines = ['⏰ Scheduled Tasks\n'];
+    for (const task of taskList) {
+      lines.push(`• ${task.id}: ${task.cron} — ${task.description || 'N/A'}`);
+    }
+    await this.channelAdapter.replyText(message, lines.join('\n'));
+    return true;
   }
 }

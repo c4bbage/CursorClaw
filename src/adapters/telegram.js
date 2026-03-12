@@ -1,5 +1,6 @@
 import TelegramBot from 'node-telegram-bot-api';
 import { ChannelAdapter } from '../channels/channel-adapter.js';
+import { BOT_COMMANDS } from '../bridge-controller.js';
 
 const STREAM_UPDATE_INTERVAL_MS = 1200;
 const STREAM_MIN_DELTA_CHARS = 24;
@@ -317,6 +318,9 @@ export class TelegramAdapter extends ChannelAdapter {
   }
 
   async start() {
-    console.log('[Telegram] Bot started');
+    await this.bot.setMyCommands(BOT_COMMANDS).catch((err) => {
+      console.error('[Telegram] Failed to register commands:', err.message);
+    });
+    console.log('[Telegram] Bot started, commands registered:', BOT_COMMANDS.map((c) => '/' + c.command).join(', '));
   }
 }

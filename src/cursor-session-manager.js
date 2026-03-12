@@ -99,14 +99,19 @@ export class CursorSessionManager extends EventEmitter {
     return true;
   }
 
-  async stopSession(scopeKey) {
+  async destroySession(scopeKey) {
     const session = this.sessions.get(scopeKey);
     if (!session) {
-      return;
+      return false;
     }
-
+    console.log('[SessionManager] Destroying session:', scopeKey);
     session.bridge.stop();
     this.sessions.delete(scopeKey);
+    return true;
+  }
+
+  async stopSession(scopeKey) {
+    return this.destroySession(scopeKey);
   }
 
   async stopAll() {
