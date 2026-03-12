@@ -3,12 +3,15 @@ import { EventEmitter } from 'events';
 import readline from 'readline';
 import { APP_COMMANDS_INSTRUCTIONS } from './app-commands.js';
 
+const DEFAULT_PROMPT_TIMEOUT_MS = 5 * 60 * 1000;
+
 export class CursorBridge extends EventEmitter {
   constructor(options = {}) {
     super();
     this.cwd = options.cwd || process.cwd();
     this.mcpServers = options.mcpServers;
     this.clientInfo = options.clientInfo || { name: 'feishu-cursor-bridge', version: '0.1.0' };
+    this.promptTimeoutMs = options.promptTimeoutMs || DEFAULT_PROMPT_TIMEOUT_MS;
     this.process = null;
     this.nextId = 1;
     this.pending = new Map();
@@ -64,36 +67,61 @@ export class CursorBridge extends EventEmitter {
   }
 
   handleMessage(msg) {
-    if (msg.id && (msg.result || msg.error)) {
+    const isResponse = msg.id != null && !msg.method;
+    if (isResponse) {
       const waiter = this.pending.get(msg.id);
       if (waiter) {
         this.pending.delete(msg.id);
         msg.error ? waiter.reject(msg.error) : waiter.resolve(msg.result);
+      } else {
+        console.warn('[Cursor] Unmatched response id=', msg.id);
       }
       return;
     }
 
     if (msg.method === 'session/update') {
       const update = msg.params?.update;
-      if (update?.sessionUpdate === 'agent_message_chunk' && update.content?.text) {
+      const updateType = update?.sessionUpdate;
+
+      if (updateType === 'agent_message_chunk' && update.content?.text) {
         if (this.activePrompt?.onChunk) {
           this.activePrompt.onChunk(update.content.text);
         }
         this.emit('chunk', update.content.text);
+      } else if (updateType === 'tool_call') {
+        const toolName = update.toolName || update.tool?.name || '';
+        console.log('[Cursor] Tool call:', toolName);
+        if (this.activePrompt?.onToolStatus) {
+          this.activePrompt.onToolStatus(toolName);
+        }
+        this.emit('tool_status', { type: 'tool_call', toolName });
+      } else if (updateType === 'tool_call_update') {
+        // silently consume intermediate tool progress
+      } else {
+        console.log('[Cursor] Session update:', updateType || 'unknown');
       }
       return;
     }
 
     if (msg.method === 'session/request_permission') {
+      console.log('[Cursor] Permission request: id=', msg.id, 'tool=', msg.params?.toolName || msg.params?.permissions?.[0]?.tool || 'unknown');
       this.respond(msg.id, {
         outcome: { outcome: 'selected', optionId: 'allow-once' }
       });
       return;
     }
 
-    if (msg.method?.startsWith('cursor/')) {
-      console.log('[Cursor] Extension event:', msg.method);
-      this.emit('cursor_event', msg);
+    const isCursorEvent = msg.method?.startsWith('cursor/') || msg.method?.startsWith('_cursor/');
+    if (isCursorEvent) {
+      const normalizedMethod = msg.method.replace(/^_cursor\//, 'cursor/');
+      console.log('[Cursor] Extension event:', msg.method, '→', normalizedMethod, 'id=', msg.id);
+      this.emit('cursor_event', { ...msg, method: normalizedMethod });
+      return;
+    }
+
+    if (msg.id && msg.method) {
+      console.warn('[Cursor] Unhandled request, auto-acknowledging:', msg.method, 'id=', msg.id);
+      this.respond(msg.id, { acknowledged: true });
       return;
     }
 
@@ -138,7 +166,8 @@ ${message}`;
           chunkCount += 1;
           fullResponse += text;
           options.onChunk?.(text);
-        }
+        },
+        onToolStatus: options.onToolStatus || null
       };
 
       const content = [{ type: 'text', text: systemPrompt }];
@@ -160,10 +189,22 @@ ${message}`;
       });
 
       try {
-        const result = await this.send('session/prompt', {
+        const promptPromise = this.send('session/prompt', {
           sessionId: this.sessionId,
           prompt: content
         });
+
+        const timeoutMs = options.timeoutMs || this.promptTimeoutMs;
+        const result = await Promise.race([
+          promptPromise,
+          new Promise((_, reject) => {
+            const timer = setTimeout(() => {
+              reject(new Error(`Prompt timed out after ${Math.round(timeoutMs / 1000)}s`));
+            }, timeoutMs);
+            promptPromise.then(() => clearTimeout(timer), () => clearTimeout(timer));
+          })
+        ]);
+
         const text = fullResponse || this.extractTextFromResult(result);
         console.log('[Cursor] Prompt complete:', {
           sessionId: this.sessionId,
@@ -176,6 +217,17 @@ ${message}`;
           text,
           stopReason: result?.stopReason || 'unknown'
         };
+      } catch (error) {
+        if (error.message?.includes('timed out') && fullResponse) {
+          console.warn('[Cursor] Prompt timed out but has partial response:', {
+            sessionId: this.sessionId,
+            chunkCount,
+            responseLength: fullResponse.length
+          });
+          this.cancelCurrentPrompt();
+          return { text: fullResponse, stopReason: 'timeout' };
+        }
+        throw error;
       } finally {
         this.activePrompt = null;
       }
@@ -212,6 +264,21 @@ ${message}`;
     };
 
     return params;
+  }
+
+  cancelCurrentPrompt() {
+    if (!this.sessionId) {
+      return;
+    }
+    console.log('[Cursor] Sending session/cancel for session:', this.sessionId);
+    this.process.stdin.write(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: this.nextId++,
+        method: 'session/cancel',
+        params: { sessionId: this.sessionId }
+      }) + '\n'
+    );
   }
 
   stop() {

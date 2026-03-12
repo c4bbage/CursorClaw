@@ -1,12 +1,11 @@
 import 'dotenv/config';
-import { FeishuAdapter } from './src/adapters/feishu.js';
 import { BridgeController } from './src/bridge-controller.js';
+import { TelegramAdapter } from './src/adapters/telegram.js';
 import { CursorSessionManager } from './src/cursor-session-manager.js';
 import { TaskScheduler } from './src/task-scheduler.js';
 
-const feishu = new FeishuAdapter({
-  appId: process.env.FEISHU_APP_ID,
-  appSecret: process.env.FEISHU_APP_SECRET
+const telegram = new TelegramAdapter({
+  token: process.env.TELEGRAM_BOT_TOKEN
 });
 
 const cursorSessions = new CursorSessionManager({
@@ -14,13 +13,12 @@ const cursorSessions = new CursorSessionManager({
 });
 const scheduler = new TaskScheduler();
 const controller = new BridgeController({
-  channelAdapter: feishu,
+  channelAdapter: telegram,
   cursorSessions,
   scheduler
 });
 
 controller.attach();
 
-await feishu.start();
-
-console.log('Feishu ↔ Cursor Bridge started!');
+await telegram.start();
+console.log('Telegram ↔ Cursor Bridge started!');

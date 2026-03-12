@@ -1,9 +1,119 @@
 import { Client, WSClient, EventDispatcher } from '@larksuiteoapi/node-sdk';
-import { EventEmitter } from 'events';
+import { ChannelAdapter } from '../channels/channel-adapter.js';
 
-export class FeishuAdapter extends EventEmitter {
+const STREAM_UPDATE_INTERVAL_MS = 1200;
+const STREAM_MIN_DELTA_CHARS = 24;
+const STREAM_PLACEHOLDER = '正在思考...';
+const STREAM_IN_PROGRESS_SUFFIX = '\n\n[生成中...]';
+
+class FeishuStreamHandle {
+  constructor(adapter, sourceMessageId) {
+    this.adapter = adapter;
+    this.sourceMessageId = sourceMessageId;
+    this.replyMessageId = null;
+    this.timer = null;
+    this.pendingText = '';
+    this.lastRenderedText = '';
+    this.updateChain = Promise.resolve();
+    this.started = false;
+  }
+
+  async ensureStarted() {
+    if (this.started) {
+      return;
+    }
+    this.started = true;
+    try {
+      const response = await this.adapter.reply(this.sourceMessageId, STREAM_PLACEHOLDER);
+      this.replyMessageId = response?.data?.message_id || null;
+    } catch (error) {
+      console.error('[Feishu] Failed to create stream reply:', error);
+    }
+    console.log('[Feishu] Stream reply started:', {
+      sourceMessageId: this.sourceMessageId,
+      replyMessageId: this.replyMessageId
+    });
+  }
+
+  push(text) {
+    this.pendingText = text;
+
+    if (!this.started) {
+      this.updateChain = this.updateChain.then(() => this.ensureStarted());
+    }
+
+    const delta = Math.abs(this.pendingText.length - this.lastRenderedText.length);
+    if (delta < STREAM_MIN_DELTA_CHARS && this.timer) {
+      return;
+    }
+
+    if (!this.timer) {
+      this.timer = setTimeout(() => {
+        this.timer = null;
+        this.flush(false).catch((error) => {
+          console.error('[Feishu] Stream flush failed:', error);
+        });
+      }, STREAM_UPDATE_INTERVAL_MS);
+    }
+  }
+
+  async flush(final) {
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+
+    const baseText = this.pendingText.trim() || STREAM_PLACEHOLDER;
+    const nextText = final ? baseText : `${baseText}${STREAM_IN_PROGRESS_SUFFIX}`;
+
+    if (!final && nextText === this.lastRenderedText) {
+      return;
+    }
+
+    this.updateChain = this.updateChain
+      .then(async () => {
+        await this.ensureStarted();
+
+        if (this.replyMessageId) {
+          await this.adapter.updateMessage(this.replyMessageId, nextText);
+          this.lastRenderedText = nextText;
+          return;
+        }
+
+        if (!final) {
+          return;
+        }
+        console.warn('[Feishu] No reply message for finalize, sending new reply');
+        const response = await this.adapter.reply(this.sourceMessageId, nextText);
+        this.replyMessageId = response?.data?.message_id || null;
+        this.lastRenderedText = nextText;
+      })
+      .catch((error) => {
+        console.error('[Feishu] Stream update failed:', {
+          final,
+          sourceMessageId: this.sourceMessageId,
+          replyMessageId: this.replyMessageId,
+          error: error.message || error
+        });
+      });
+
+    return this.updateChain;
+  }
+
+  async finalize(text) {
+    this.pendingText = text;
+    await this.flush(true);
+  }
+
+  async fail(message) {
+    this.pendingText = message;
+    await this.flush(true);
+  }
+}
+
+export class FeishuAdapter extends ChannelAdapter {
   constructor({ appId, appSecret }) {
-    super();
+    super('feishu');
     this.appId = appId;
     this.appSecret = appSecret;
     this.client = new Client({ appId, appSecret });
@@ -16,28 +126,28 @@ export class FeishuAdapter extends EventEmitter {
         const { message, sender } = data;
 
         const msgData = {
-          userId: sender.sender_id.open_id || sender.sender_id.user_id,
-          messageId: message.message_id,
+          userKey: sender.sender_id.open_id || sender.sender_id.user_id,
+          conversationKey: message.chat_id,
+          messageKey: message.message_id,
           messageType: message.message_type,
-          content: '',
-          images: [],
-          audio: null
+          text: '',
+          attachments: [],
+          raw: data
         };
 
-        // 处理不同类型消息
         if (message.message_type === 'text') {
-          msgData.content = JSON.parse(message.content).text;
+          msgData.text = JSON.parse(message.content).text;
         } else if (message.message_type === 'image') {
           const imageKey = JSON.parse(message.content).image_key;
-          msgData.content = '[图片]';
-          msgData.images.push({ imageKey });
+          msgData.text = '[图片]';
+          msgData.attachments.push({ type: 'image', imageKey });
         } else if (message.message_type === 'audio') {
           const fileKey = JSON.parse(message.content).file_key;
-          msgData.content = '[语音]';
-          msgData.audio = { fileKey };
+          msgData.text = '[语音]';
+          msgData.attachments.push({ type: 'audio', fileKey });
         }
 
-        this.emit('message', msgData);
+        this.emitMessage(msgData);
       }
     });
 
@@ -58,6 +168,37 @@ export class FeishuAdapter extends EventEmitter {
     wsClient.start({ eventDispatcher });
   }
 
+  async acknowledge(message) {
+    await this.addReaction(message.replyRef.messageKey);
+  }
+
+  async resolvePromptInput(message) {
+    const promptOptions = {};
+    let promptText = message.text || '';
+    const images = message.attachments.filter((attachment) => attachment.type === 'image');
+    const audios = message.attachments.filter((attachment) => attachment.type === 'audio');
+
+    if (images.length > 0) {
+      promptOptions.images = [];
+      for (const image of images) {
+        const base64 = await this.getImageBase64(image.imageKey);
+        promptOptions.images.push({ mimeType: 'image/png', data: base64 });
+      }
+      promptText += '\n\n用户附带了图片，请结合图片内容回答。';
+    }
+
+    if (audios.length > 0) {
+      const transcription = await this.transcribeAudio(audios[0].fileKey);
+      promptText = transcription;
+    }
+
+    return { promptText, promptOptions };
+  }
+
+  createStreamHandle(message) {
+    return new FeishuStreamHandle(this, message.replyRef.messageKey);
+  }
+
   async reply(messageId, content, options = {}) {
     const response = await this.client.im.message.reply({
       path: { message_id: messageId },
@@ -68,15 +209,24 @@ export class FeishuAdapter extends EventEmitter {
   }
 
   async sendMessage(userId, content, options = {}) {
+    const normalizedTarget = typeof userId === 'object' ? userId.userKey : userId;
     const response = await this.client.im.message.create({
       params: { receive_id_type: 'open_id' },
       data: {
-        receive_id: userId,
+        receive_id: normalizedTarget,
         ...this.buildMessagePayload(content, options)
       }
     });
-    console.log('[Feishu] Sent message to user:', userId, 'response:', response.data);
+    console.log('[Feishu] Sent message to user:', normalizedTarget, 'response:', response.data);
     return response;
+  }
+
+  async sendText(target, text, options = {}) {
+    return this.sendMessage(target, text, options);
+  }
+
+  async replyText(message, text, options = {}) {
+    return this.reply(message.replyRef.messageKey, text, options);
   }
 
   async updateMessage(messageId, content, options = {}) {
@@ -134,10 +284,15 @@ export class FeishuAdapter extends EventEmitter {
     }
   }
 
-  async sendFile(userId, filePath, fileName) {
+  async sendFile(targetOrUser, filePath, fileName) {
+    const userId = typeof targetOrUser === 'object' ? targetOrUser.userKey : targetOrUser;
     const fs = await import('fs');
-    const fileStream = fs.createReadStream(filePath);
 
+    if (!fs.existsSync(filePath)) {
+      throw new Error(`文件不存在: ${filePath}`);
+    }
+
+    const fileStream = fs.createReadStream(filePath);
     const res = await this.client.im.file.create({
       data: {
         file_type: 'stream',
@@ -146,12 +301,18 @@ export class FeishuAdapter extends EventEmitter {
       }
     });
 
+    const fileKey = res?.data?.file_key;
+    if (!fileKey) {
+      console.error('[Feishu] File upload returned no file_key:', { filePath, response: res });
+      throw new Error(`文件上传失败，飞书未返回 file_key: ${filePath}`);
+    }
+
     await this.client.im.message.create({
       params: { receive_id_type: 'open_id' },
       data: {
         receive_id: userId,
         msg_type: 'file',
-        content: JSON.stringify({ file_key: res.data.file_key })
+        content: JSON.stringify({ file_key: fileKey })
       }
     });
   }

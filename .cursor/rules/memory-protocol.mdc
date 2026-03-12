@@ -1,0 +1,64 @@
+---
+description: Memory read/write protocol for cross-session continuity
+alwaysApply: true
+---
+
+# CursorClaw — Memory Protocol
+
+## Directory Layout
+
+```
+memory/
+  MEMORY.md           # Long-term curated knowledge (committed to git)
+  YYYY-MM-DD.md       # Daily session logs (gitignored)
+```
+
+## Long-Term Memory (`memory/MEMORY.md`)
+
+Stores durable facts: architecture decisions, project milestones, resolved
+bug classes, established conventions. This file is version-controlled and
+should stay under 200 lines. When it grows past that, consolidate stale
+entries or graduate them to docs.
+
+## Daily Log (`memory/YYYY-MM-DD.md`)
+
+One file per day, created on first write. Format:
+
+```markdown
+# YYYY-MM-DD
+
+## HH:MM Session — [brief topic]
+- What was done
+- Decisions made
+- Issues found / resolved
+```
+
+These files are gitignored. They serve as short-term recall for
+the next few sessions.
+
+## Read Protocol
+
+At session start (before first response):
+1. Read `memory/MEMORY.md`.
+2. Read today's file: `memory/<today>.md`.
+3. Read yesterday's file: `memory/<yesterday>.md` (skip if absent).
+
+If the `session-memory.sh` hook already injected this content via
+`additional_context`, skip the manual reads.
+
+## Write Protocol
+
+Capture to today's daily log when any of these occur:
+- A non-trivial bug is found or fixed.
+- An architecture or design decision is made.
+- A new convention or constraint is established.
+- A user preference is expressed.
+
+Update `memory/MEMORY.md` when a learning is broadly reusable across
+sessions (not just today's context).
+
+## Maintenance
+
+- Daily logs older than 7 days rarely need reading; the agent should
+  only go further back if the user or context explicitly requires it.
+- Prune `MEMORY.md` entries that are superseded or no longer relevant.

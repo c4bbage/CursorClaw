@@ -1,0 +1,48 @@
+---
+description: Tool and dependency conventions for this project
+alwaysApply: true
+---
+
+# CursorClaw — Tools & Dependencies
+
+## ACP JSON-RPC Gotchas
+
+- `id` and `result` can be `0` or `null`. **Never use truthy checks**
+  (`if (id)` / `if (result)`). Use `!= null` or structural checks.
+- Cursor CLI extension methods come in two prefixes: `cursor/` and `_cursor/`.
+  Always match both; normalize `_cursor/` → `cursor/`.
+- Any incoming JSON-RPC request with an `id` that you don't handle must
+  still be acknowledged, otherwise the agent process hangs.
+- `session/update` has multiple subtypes: `agent_message_chunk`,
+  `agent_thought_chunk`, `tool_call`, `tool_call_update`. Cover all of them
+  (at minimum log unknowns) or tool-call phases become a black box.
+- Stream promise chains must have `.catch()` on every link. A missing catch
+  causes `finalize` to never execute.
+- `session/new` must not default `mcpServers: []` — omit the field entirely
+  when no MCP servers are configured.
+
+## Feishu (Lark) SDK
+
+- `@larksuiteoapi/node-sdk@^1.32.0` provides `client.im.message.update()`
+  for streaming reply updates on a single message.
+- Interactive card (`interactive` msg_type) schema has not been fully
+  validated in this project. On production errors, fall back to the stable
+  `post` message type.
+
+## Telegram Bot API
+
+- `node-telegram-bot-api@^0.67.0` provides `sendMessage`,
+  `editMessageText`, `sendChatAction`, `getFileLink`.
+- Telegram message limit: 4096 chars. Use `splitMessage()` for long texts.
+- Use `markdownToTelegramHtml()` + `parse_mode: 'HTML'` for rich formatting;
+  fall back to plain text on parse errors.
+
+## Prompt Timeout
+
+- Default ACP prompt timeout: 5 minutes (`DEFAULT_PROMPT_TIMEOUT_MS`).
+  On timeout, `cancelCurrentPrompt()` sends `session/cancel` and returns
+  the partial response accumulated so far.
+
+## Reference
+
+Full debugging lessons: `docs/acp-bridge-lessons.md`.

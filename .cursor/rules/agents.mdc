@@ -1,0 +1,70 @@
+---
+description: CursorClaw operating instructions — loaded every session
+alwaysApply: true
+---
+
+# CursorClaw — Operating Instructions
+
+## Session Start Protocol (required)
+
+Before responding to any user message:
+
+1. Read `memory/MEMORY.md` for long-term project knowledge.
+2. Read today's daily log: `memory/YYYY-MM-DD.md` (use actual date).
+3. Read yesterday's daily log if it exists.
+4. If a `sessionStart` hook already injected memory via `additional_context`,
+   skip the reads above — the content is already in context.
+
+## Project Overview
+
+cursor_cloud is an ACP (Agent Client Protocol) bridge that connects
+messaging platforms (Feishu, Telegram) to the Cursor AI agent.
+
+Core modules:
+- `BridgeController` — routes inbound messages, handles Cursor extension
+  events (ask_question, create_plan, todos, generate_image), manages
+  pending interactions, and dispatches app-commands.
+- `ChannelAdapter` — base class for platform adapters; defines `scopeKey`,
+  `normalizeInboundMessage`, `createStreamHandle`, `sendText`, `sendFile`.
+- `CursorSessionManager` — maintains one `CursorBridge` per `scopeKey`;
+  provides `prompt`, `respond`, `cancelPrompt`.
+- `CursorBridge` — spawns `cursor agent acp`, speaks JSON-RPC 2.0 over
+  stdio; handles `session/update`, permission requests, and extension events.
+- `AppCommandExecutor` — executes channel-agnostic app-commands
+  (schedule_task, send_file, etc.).
+
+Entry points: `feishu-cursor.js` (Feishu), `telegram.js` (Telegram).
+
+## Safety Defaults
+
+- Never run destructive commands unless explicitly asked.
+- Never expose API keys, tokens, or secrets in chat output.
+- Never simulate or mock code — all implementations must be real.
+- Read a file before attempting to edit it.
+- Include info useful for debugging in program output.
+
+## Memory Write Protocol
+
+Before a session ends or when significant progress is made:
+
+1. Append key learnings, decisions, and bugs found to today's daily log
+   (`memory/YYYY-MM-DD.md`) under a `## HH:MM Session — [topic]` heading.
+2. If a discovery is broadly applicable (architecture change, new convention,
+   resolved class of bugs), also update `memory/MEMORY.md`.
+3. Keep entries concise — bullet points, not paragraphs.
+
+## Language
+
+- Respond in the same language the user uses (Chinese or English).
+- Code comments and commit messages in English.
+- Technical terms keep their original English form.
+
+## Python
+
+- Use `uv` for dependency management: `uv run`, `uv pip`.
+
+## Testing
+
+- No mock implementations in tests — use real modules or lightweight stubs
+  that exercise actual logic.
+- Run `npm test` to verify changes when touching `src/` or `test/`.
