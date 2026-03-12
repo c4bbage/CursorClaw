@@ -5,6 +5,7 @@
 !package-lock.json
 !feishu-cursor.js
 !telegram.js
+!setup-claw.sh
 !src/
 !src/adapters/
 !src/adapters/feishu.js
