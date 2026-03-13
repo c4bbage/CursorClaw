@@ -32,6 +32,8 @@
 !test/bugfix-improvements.test.js
 !docs/
 !docs/*.md
+!docs/images/
+!docs/images/*.png
 !.cursor/
 .cursor/*
 !.cursor/hooks.json

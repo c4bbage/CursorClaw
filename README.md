@@ -8,6 +8,17 @@ CursorClaw Bridge connects messaging platforms to [Cursor's ACP protocol](https:
 
 CursorClaw Bridge 将即时通讯平台接入 [Cursor ACP 协议](https://cursor.com/docs/cli/acp)，让你在任何聊天窗口都能使用完整的 AI 编程能力。你的 `.cursor/rules`、Skills、MCP 和 Hooks 全部可用——不需要打开 IDE。
 
+<p align="center">
+  <img src="docs/images/telegram-streaming.png" width="260" alt="Streaming reply with MCP tools" />
+  &nbsp;&nbsp;
+  <img src="docs/images/telegram-schedule-create.png" width="260" alt="Create scheduled task + voice reply" />
+  &nbsp;&nbsp;
+  <img src="docs/images/telegram-schedule-fire.png" width="260" alt="Scheduled task fires with voice" />
+</p>
+<p align="center">
+  <em>Left: Streaming reply via MCP web search / 流式回复 + MCP 搜索 &nbsp;|&nbsp; Middle: Create a scheduled task + voice / 创建定时任务 + 语音 &nbsp;|&nbsp; Right: Task fires on time / 定时任务触发</em>
+</p>
+
 ---
 
 ## Philosophy / 理念
