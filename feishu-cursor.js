@@ -1,9 +1,12 @@
 import 'dotenv/config';
+import { resolve } from 'path';
 import { FeishuAdapter } from './src/adapters/feishu.js';
 import { BridgeController } from './src/bridge-controller.js';
 import { CursorSessionManager } from './src/cursor-session-manager.js';
 import { TaskScheduler } from './src/task-scheduler.js';
 import { ElevenLabsClient } from './src/elevenlabs.js';
+
+const projectDir = resolve(process.env.CURSOR_PROJECT_DIR || process.argv[2] || process.cwd());
 
 const elevenLabs = new ElevenLabsClient({
   apiKey: process.env.ELEVENLABS_API_KEY,
@@ -19,7 +22,7 @@ const feishu = new FeishuAdapter({
 });
 
 const cursorSessions = new CursorSessionManager({
-  cwd: process.cwd()
+  cwd: projectDir
 });
 const scheduler = new TaskScheduler();
 const controller = new BridgeController({
@@ -32,5 +35,5 @@ const controller = new BridgeController({
 controller.attach();
 
 await feishu.start();
-
-console.log('Feishu ↔ Cursor Bridge started!');
+console.log(`Feishu ↔ Cursor Bridge started! (project: ${projectDir})`);
+await controller.sendStartupGreeting();

@@ -363,6 +363,40 @@ export class BridgeController {
     return true;
   }
 
+  async sendStartupGreeting() {
+    const targets = this.channelAdapter.getNotifyTargets();
+    if (targets.length === 0) return;
+
+    const cwd = process.cwd().split('/').pop();
+    const channel = this.channelAdapter.channelId;
+    const voice = this.elevenLabs?.enabled ? '✅' : '❌';
+    const hookRunner = this.cursorSessions.hookRunner;
+    const hookCount = hookRunner?.hookCount ?? 0;
+    const now = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+
+    const greeting = [
+      `🤖 CursorClaw Bridge Online`,
+      ``,
+      `📂 Project: ${cwd}`,
+      `📡 Channel: ${channel}`,
+      `🪝 Hooks: ${hookCount} events configured`,
+      `🎙️ Voice: ${voice}`,
+      `⏰ Time: ${now}`,
+      ``,
+      `Send a message to start, or /help for commands.`,
+      `发送消息开始对话，或 /help 查看命令。`
+    ].join('\n');
+
+    for (const target of targets) {
+      try {
+        await this.channelAdapter.sendText(target, greeting);
+        console.log(`[Bridge] Startup greeting sent to ${target.conversationKey}`);
+      } catch (err) {
+        console.error(`[Bridge] Failed to send startup greeting to ${target.conversationKey}:`, err.message);
+      }
+    }
+  }
+
   _maybeSendVoice(message, text) {
     if (!this.elevenLabs?.enabled) return;
     if (!this.voiceMode.get(message.scopeKey)) return;

@@ -18,6 +18,10 @@ export class HookRunner {
     this.reload();
   }
 
+  get hookCount() {
+    return Object.keys(this.hooks).length;
+  }
+
   reload() {
     const configPath = join(this.projectDir, '.cursor', 'hooks.json');
     if (!existsSync(configPath)) {
