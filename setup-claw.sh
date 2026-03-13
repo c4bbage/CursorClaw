@@ -1,36 +1,43 @@
 #!/bin/bash
 #
-# CursorClaw Setup Script
-#
-# Bootstraps the CursorClaw memory system into a project or user-level config.
+# CursorClaw Setup Script / CursorClaw 安装脚本
 #
 # Usage:
-#   bash setup-claw.sh            # Install into current project
-#   bash setup-claw.sh --global   # Install into ~/.cursor/ (all projects)
-#   bash setup-claw.sh --help     # Show help
+#   bash setup-claw.sh                # Project-level install / 项目级安装
+#   bash setup-claw.sh --global       # User-level install / 用户级安装
+#   bash setup-claw.sh --bridge       # Bridge project setup / 桥接项目安装
+#   bash setup-claw.sh --help         # Show help / 显示帮助
 #
 
 set -euo pipefail
 
 REPO_URL="https://raw.githubusercontent.com/c4bbage/CursorClaw/main"
 GLOBAL=false
+BRIDGE=false
 
 usage() {
   cat <<'USAGE'
 CursorClaw Setup — AI agent memory system for Cursor IDE
+CursorClaw 安装 — Cursor IDE 的 AI 助手记忆系统
 
-Usage:
-  bash setup-claw.sh              Project-level install (current directory)
-  bash setup-claw.sh --global     User-level install (~/.cursor/)
-  bash setup-claw.sh --help       Show this message
+Usage / 用法:
+  bash setup-claw.sh              Project-level install / 项目级安装
+  bash setup-claw.sh --global     User-level install / 用户级安装
+  bash setup-claw.sh --bridge     Bridge project setup / 桥接项目安装
+  bash setup-claw.sh --help       Show this message / 显示帮助
 
-Project-level:
-  Installs into .cursor/ and memory/ of the current project.
-  Rules and hooks are committed to git and shared with the team.
+Modes / 模式:
 
-User-level (--global):
-  Installs into ~/.cursor/ and ~/cursorclaw-memory/.
-  Applies to ALL projects. Overridden by project-level rules.
+  (default)    Installs rules, hooks, and memory into the current project.
+               在当前项目安装 rules、hooks 和 memory。
+
+  --global     Installs into ~/.cursor/ (applies to all projects).
+               安装到 ~/.cursor/（所有项目生效）。
+
+  --bridge     Everything in default + installs npm deps + generates .env.
+               默认模式的全部内容 + 安装 npm 依赖 + 生成 .env 文件。
+               Use this when setting up the CursorClaw Bridge for Feishu/Telegram.
+               在搭建飞书/Telegram 桥接服务时使用此模式。
 
 USAGE
   exit 0
@@ -39,12 +46,13 @@ USAGE
 for arg in "$@"; do
   case "$arg" in
     --global) GLOBAL=true ;;
+    --bridge) BRIDGE=true ;;
     --help|-h) usage ;;
   esac
 done
 
 if ! command -v jq &>/dev/null; then
-  echo "ERROR: jq is required but not installed."
+  echo "ERROR: jq is required but not installed. / 错误：需要 jq 但未安装。"
   echo "  macOS:  brew install jq"
   echo "  Ubuntu: sudo apt install jq"
   exit 1
@@ -54,7 +62,7 @@ if [ "$GLOBAL" = true ]; then
   TARGET_DIR="$HOME/.cursor"
   MEMORY_DIR="$HOME/cursorclaw-memory"
   HOOK_PREFIX="./hooks"
-  echo "=== CursorClaw: User-level install ==="
+  echo "=== CursorClaw: User-level install / 用户级安装 ==="
   echo "  Rules:  $TARGET_DIR/rules/"
   echo "  Hooks:  $TARGET_DIR/hooks/"
   echo "  Memory: $MEMORY_DIR/"
@@ -62,7 +70,11 @@ else
   TARGET_DIR=".cursor"
   MEMORY_DIR="memory"
   HOOK_PREFIX=".cursor/hooks"
-  echo "=== CursorClaw: Project-level install ==="
+  if [ "$BRIDGE" = true ]; then
+    echo "=== CursorClaw: Bridge project setup / 桥接项目安装 ==="
+  else
+    echo "=== CursorClaw: Project-level install / 项目级安装 ==="
+  fi
   echo "  Rules:  $TARGET_DIR/rules/"
   echo "  Hooks:  $TARGET_DIR/hooks/"
   echo "  Memory: $MEMORY_DIR/"
@@ -79,7 +91,7 @@ mkdir -p "$MEMORY_DIR"
 write_if_missing() {
   local path="$1"
   if [ -f "$path" ]; then
-    echo "  SKIP  $path (already exists)"
+    echo "  SKIP  $path (exists / 已存在)"
     return
   fi
   cat > "$path"
@@ -107,6 +119,7 @@ Before responding to any user message:
 ## Project Overview
 
 (Describe your project here: what it does, core modules, entry points.)
+(在这里描述你的项目：做什么、核心模块、入口文件。)
 
 ## Safety Defaults
 
@@ -115,15 +128,6 @@ Before responding to any user message:
 - Never simulate or mock code — all implementations must be real.
 - Read a file before attempting to edit it.
 - Include info useful for debugging in program output.
-
-## Memory Write Protocol
-
-Before a session ends or when significant progress is made:
-
-1. Append key learnings to today's daily log (`memory/YYYY-MM-DD.md`)
-   under a `## HH:MM Session — [topic]` heading.
-2. If broadly applicable, also update `memory/MEMORY.md`.
-3. Keep entries concise — bullet points, not paragraphs.
 MDC
 
 write_if_missing "$TARGET_DIR/rules/soul.mdc" <<'MDC'
@@ -169,6 +173,7 @@ alwaysApply: true
 # CursorClaw — Tools & Dependencies
 
 (Add your project-specific tool notes, SDK gotchas, and conventions here.)
+(在这里添加你的项目工具备忘、SDK 注意事项和约定。)
 
 ## Example
 
@@ -461,22 +466,85 @@ write_if_missing "$TARGET_DIR/hooks.json" <<HOOKJSON
 }
 HOOKJSON
 
-# ─── Memory seed ───────────────────────────────────────────────────
+# ─── Memory seed / 记忆初始化 ─────────────────────────────────────
 
 write_if_missing "$MEMORY_DIR/MEMORY.md" <<'SEED'
 # Project Memory
 
-(Add your project knowledge here. Architecture, conventions, lessons learned.)
+(Add your project knowledge here: architecture, conventions, lessons learned.)
+(在这里添加你的项目知识：架构、约定、经验教训。)
 SEED
 
 touch "$MEMORY_DIR/.gitkeep"
 
-# ─── .gitignore hints ──────────────────────────────────────────────
+# ─── Bridge mode / 桥接模式 ───────────────────────────────────────
+
+if [ "$BRIDGE" = true ]; then
+  echo ""
+  echo "=== Bridge Setup / 桥接服务安装 ==="
+
+  # Generate .env from .env.example
+  if [ -f ".env.example" ] && [ ! -f ".env" ]; then
+    cp .env.example .env
+    echo "  CREATE .env (copied from .env.example / 从 .env.example 复制)"
+    echo "  ⚠  Edit .env with your credentials / 请编辑 .env 填入你的凭据"
+  elif [ -f ".env" ]; then
+    echo "  SKIP  .env (exists / 已存在)"
+  else
+    write_if_missing ".env.example" <<'ENVEXAMPLE'
+FEISHU_APP_ID=your_feishu_app_id
+FEISHU_APP_SECRET=your_feishu_app_secret
+# Comma-separated open_id allowlist (empty = allow all)
+# 逗号分隔的 open_id 白名单（空 = 允许所有人）
+FEISHU_ALLOWED_USERS=
+FEISHU_ALLOWED_CHATS=
+
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token
+# Comma-separated numeric user ID allowlist (empty = allow all)
+# 逗号分隔的用户 ID 白名单（空 = 允许所有人）
+TELEGRAM_ALLOWED_USERS=
+TELEGRAM_ALLOWED_CHATS=
+
+# ElevenLabs (TTS + STT, optional / 可选)
+ELEVENLABS_API_KEY=
+ELEVENLABS_VOICE_ID=
+ENVEXAMPLE
+    cp .env.example .env
+    echo "  CREATE .env.example"
+    echo "  CREATE .env (copied from .env.example)"
+    echo "  ⚠  Edit .env with your credentials / 请编辑 .env 填入你的凭据"
+  fi
+
+  # npm install
+  if [ -f "package.json" ]; then
+    if [ ! -d "node_modules" ]; then
+      echo ""
+      echo "  Installing npm dependencies... / 安装 npm 依赖..."
+      npm install --silent 2>&1 | tail -3
+      echo "  ✓ npm install complete / npm 安装完成"
+    else
+      echo "  SKIP  npm install (node_modules exists / 已存在)"
+    fi
+  fi
+
+  # Check agent CLI
+  echo ""
+  if command -v agent &>/dev/null; then
+    echo "  ✓ Cursor CLI (agent) found / Cursor CLI 已找到"
+  else
+    echo "  ⚠  Cursor CLI (agent) not found in PATH / 未在 PATH 中找到"
+    echo "     Install Cursor, then run: agent login"
+    echo "     安装 Cursor 后运行：agent login"
+  fi
+fi
+
+# ─── .gitignore hints / .gitignore 建议 ───────────────────────────
 
 if [ "$GLOBAL" = false ]; then
   echo ""
   echo "=== .gitignore ==="
-  echo "Add these lines to your .gitignore to track rules but ignore logs:"
+  echo "Add these lines to track rules but ignore logs:"
+  echo "将以下内容加入 .gitignore 以跟踪规则但忽略日志："
   echo ""
   cat <<'GITIGNORE'
   # CursorClaw
@@ -497,13 +565,25 @@ if [ "$GLOBAL" = false ]; then
 GITIGNORE
 fi
 
+# ─── Done / 完成 ──────────────────────────────────────────────────
+
 echo ""
-echo "=== Done! ==="
+echo "=== Done! / 完成！ ==="
 echo ""
-echo "Next steps:"
-echo "  1. Edit $TARGET_DIR/rules/soul.mdc — define your Claw's personality"
-echo "  2. Edit $TARGET_DIR/rules/agents.mdc — add your project overview"
-echo "  3. Edit $TARGET_DIR/rules/tools.mdc — add your tool notes"
-echo "  4. Edit $MEMORY_DIR/MEMORY.md — seed your project knowledge"
+echo "Next steps / 下一步："
+echo "  1. Edit $TARGET_DIR/rules/soul.mdc  — define your Claw's personality / 定义人格风格"
+echo "  2. Edit $TARGET_DIR/rules/agents.mdc — add your project overview / 添加项目概述"
+echo "  3. Edit $TARGET_DIR/rules/tools.mdc  — add your tool notes / 添加工具备忘"
+echo "  4. Edit $MEMORY_DIR/MEMORY.md        — seed your project knowledge / 初始化项目知识"
+
+if [ "$BRIDGE" = true ]; then
+  echo ""
+  echo "Bridge-specific / 桥接服务："
+  echo "  5. Edit .env                        — fill in bot credentials / 填入 Bot 凭据"
+  echo "  6. Run: agent login                 — authenticate Cursor CLI / 登录 Cursor CLI"
+  echo "  7. Run: npm start                   — start Feishu bridge / 启动飞书桥接"
+  echo "     Run: npm run start:telegram      — start Telegram bridge / 启动 Telegram 桥接"
+fi
+
 echo ""
 echo "Docs: https://github.com/c4bbage/CursorClaw/blob/main/docs/cursorclaw-quickstart.md"

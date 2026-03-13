@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      { "command": ".cursor/hooks/log-event.sh" },
+      { "command": ".cursor/hooks/session-memory.sh" }
+    ],
+    "sessionEnd": [
+      { "command": ".cursor/hooks/log-event.sh" }
+    ],
+    "preToolUse": [
+      {
+        "command": ".cursor/hooks/validate-tool.sh",
+        "matcher": "Shell|Write|StrReplace|Delete"
+      }
+    ],
+    "postToolUse": [
+      { "command": ".cursor/hooks/log-event.sh" }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": ".cursor/hooks/block-dangerous-cmd.sh",
+        "matcher": "rm -rf|drop table|truncate",
+        "failClosed": true
+      }
+    ],
+    "afterShellExecution": [
+      { "command": ".cursor/hooks/log-event.sh" }
+    ],
+    "beforeMCPExecution": [
+      { "command": ".cursor/hooks/log-event.sh" }
+    ],
+    "afterMCPExecution": [
+      { "command": ".cursor/hooks/log-event.sh" }
+    ],
+    "beforeReadFile": [
+      {
+        "command": ".cursor/hooks/redact-secrets.sh",
+        "matcher": "Read",
+        "failClosed": true
+      }
+    ],
+    "afterFileEdit": [
+      { "command": ".cursor/hooks/log-event.sh" }
+    ],
+    "beforeSubmitPrompt": [
+      { "command": ".cursor/hooks/log-event.sh" }
+    ],
+    "subagentStart": [
+      {
+        "command": ".cursor/hooks/log-event.sh",
+        "matcher": "generalPurpose|explore|shell"
+      }
+    ],
+    "subagentStop": [
+      { "command": ".cursor/hooks/log-event.sh" }
+    ],
+    "afterAgentThought": [
+      { "command": ".cursor/hooks/log-event.sh" }
+    ],
+    "afterAgentResponse": [
+      { "command": ".cursor/hooks/log-event.sh" }
+    ],
+    "stop": [
+      {
+        "command": ".cursor/hooks/session-summary.sh",
+        "loop_limit": 5
+      }
+    ]
+  }
+}

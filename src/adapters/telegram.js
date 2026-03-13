@@ -220,11 +220,29 @@ class TelegramStreamHandle {
   }
 }
 
+function parseIdSet(envValue) {
+  if (!envValue) return null;
+  const ids = envValue.split(',').map((s) => s.trim()).filter(Boolean);
+  return ids.length > 0 ? new Set(ids) : null;
+}
+
 export class TelegramAdapter extends ChannelAdapter {
-  constructor({ token }) {
-    super('telegram');
+  constructor({ token, allowedUsers, allowedChats, elevenLabs }) {
+    super('telegram', {
+      allowedUsers: parseIdSet(allowedUsers),
+      allowedChats: parseIdSet(allowedChats)
+    });
     this.bot = new TelegramBot(token, { polling: true });
+    this.elevenLabs = elevenLabs || null;
     this.setupHandlers();
+  }
+
+  onUnauthorized(message) {
+    const chatId = message.conversationKey;
+    const userId = message.userKey;
+    this.bot.sendMessage(chatId,
+      `⛔ 无权限 / Unauthorized\n\nUser ID: ${userId}\nChat ID: ${chatId}\n\n请联系管理员将你的 ID 加入白名单。`
+    ).catch(() => {});
   }
 
   setupHandlers() {
@@ -284,9 +302,22 @@ export class TelegramAdapter extends ChannelAdapter {
       promptText += '\n\n用户附带了图片，请结合图片内容回答。';
     }
 
-    if (audios.length > 0) {
-      const audioNotice = '用户发送了语音消息，但当前 Telegram 语音转写未接入，请提醒用户改发文字。';
-      promptText = promptText ? `${promptText}\n\n${audioNotice}` : audioNotice;
+    if (audios.length > 0 && this.elevenLabs?.enabled) {
+      try {
+        const fileUrl = await this.bot.getFileLink(audios[0].fileId);
+        const response = await fetch(fileUrl);
+        const buffer = Buffer.from(await response.arrayBuffer());
+        const transcription = await this.elevenLabs.transcribe(buffer);
+        if (transcription) {
+          promptText = transcription;
+          console.log('[Telegram] Audio transcribed:', transcription.slice(0, 80));
+        }
+      } catch (err) {
+        console.error('[Telegram] Audio transcription failed:', err.message);
+        promptText = promptText || '用户发送了语音消息，但转写失败，请提醒用户改发文字。';
+      }
+    } else if (audios.length > 0) {
+      promptText = promptText || '用户发送了语音消息，但语音转写未配置，请提醒用户改发文字。';
     }
 
     return { promptText, promptOptions };
@@ -309,6 +340,11 @@ export class TelegramAdapter extends ChannelAdapter {
       const extra = i === 0 ? { reply_to_message_id: Number(message.messageKey) } : {};
       await sendWithHtmlFallback(this.bot, message.conversationKey, chunks[i], extra);
     }
+  }
+
+  async sendAudio(target, buffer, { caption } = {}) {
+    const opts = caption ? { caption } : {};
+    return this.bot.sendVoice(target.conversationKey, buffer, opts);
   }
 
   async sendFile(target, filePath, fileName) {

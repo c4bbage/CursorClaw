@@ -111,12 +111,22 @@ class FeishuStreamHandle {
   }
 }
 
+function parseIdSet(envValue) {
+  if (!envValue) return null;
+  const ids = envValue.split(',').map((s) => s.trim()).filter(Boolean);
+  return ids.length > 0 ? new Set(ids) : null;
+}
+
 export class FeishuAdapter extends ChannelAdapter {
-  constructor({ appId, appSecret }) {
-    super('feishu');
+  constructor({ appId, appSecret, allowedUsers, allowedChats, elevenLabs }) {
+    super('feishu', {
+      allowedUsers: parseIdSet(allowedUsers),
+      allowedChats: parseIdSet(allowedChats)
+    });
     this.appId = appId;
     this.appSecret = appSecret;
     this.client = new Client({ appId, appSecret });
+    this.elevenLabs = elevenLabs || null;
   }
 
   async start() {
@@ -211,8 +221,17 @@ export class FeishuAdapter extends ChannelAdapter {
     }
 
     if (audios.length > 0) {
-      const transcription = await this.transcribeAudio(audios[0].fileKey);
-      promptText = transcription;
+      let transcription = await this.transcribeAudio(audios[0].fileKey);
+      if ((!transcription || transcription === '[语音]' || transcription === '[语音识别失败]') && this.elevenLabs?.enabled) {
+        try {
+          console.log('[Feishu] Built-in STT failed, trying ElevenLabs...');
+          const audioBase64 = await this.getAudioBase64(audios[0].fileKey);
+          transcription = await this.elevenLabs.transcribe(audioBase64);
+        } catch (err) {
+          console.error('[Feishu] ElevenLabs STT fallback failed:', err.message);
+        }
+      }
+      promptText = transcription || '[语音识别失败]';
     }
 
     return { promptText, promptOptions };
@@ -305,6 +324,31 @@ export class FeishuAdapter extends ChannelAdapter {
       console.error('[Feishu] Audio transcribe error:', err);
       return '[语音]';
     }
+  }
+
+  async sendAudio(target, buffer, { fileName = 'reply.mp3' } = {}) {
+    const userId = typeof target === 'object' ? target.userKey : target;
+    const blob = new Blob([buffer], { type: 'audio/mpeg' });
+    const res = await this.client.im.file.create({
+      data: {
+        file_type: 'opus',
+        file_name: fileName,
+        file: blob
+      }
+    });
+    const fileKey = res?.data?.file_key;
+    if (!fileKey) {
+      console.error('[Feishu] Audio upload failed');
+      return;
+    }
+    await this.client.im.message.create({
+      params: { receive_id_type: 'open_id' },
+      data: {
+        receive_id: userId,
+        msg_type: 'audio',
+        content: JSON.stringify({ file_key: fileKey })
+      }
+    });
   }
 
   async sendFile(targetOrUser, filePath, fileName) {

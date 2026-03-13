@@ -5,9 +5,24 @@ export function createScopeKey({ channel, conversationKey, userKey }) {
 }
 
 export class ChannelAdapter extends EventEmitter {
-  constructor(channelId) {
+  constructor(channelId, options = {}) {
     super();
     this.channelId = channelId;
+    this.allowedUsers = options.allowedUsers || null;
+    this.allowedChats = options.allowedChats || null;
+  }
+
+  isAuthorized(message) {
+    if (!this.allowedUsers && !this.allowedChats) {
+      return true;
+    }
+    if (this.allowedUsers && this.allowedUsers.has(message.userKey)) {
+      return true;
+    }
+    if (this.allowedChats && this.allowedChats.has(message.conversationKey)) {
+      return true;
+    }
+    return false;
   }
 
   normalizeInboundMessage(message) {
@@ -34,7 +49,19 @@ export class ChannelAdapter extends EventEmitter {
   }
 
   emitMessage(message) {
+    if (!this.isAuthorized(message)) {
+      console.log(`[${this.channelId}] Unauthorized message blocked:`, {
+        userKey: message.userKey,
+        conversationKey: message.conversationKey
+      });
+      this.onUnauthorized(message);
+      return;
+    }
     this.emit('message', this.normalizeInboundMessage(message));
+  }
+
+  onUnauthorized(_message) {
+    // Subclasses can override to send a rejection reply
   }
 
   async start() {

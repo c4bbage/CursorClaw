@@ -3,6 +3,7 @@
 !.env.example
 !package.json
 !package-lock.json
+!README.md
 !feishu-cursor.js
 !telegram.js
 !setup-claw.sh
@@ -18,6 +19,8 @@
 !src/cursor-bridge.js
 !src/cursor-events.js
 !src/cursor-session-manager.js
+!src/elevenlabs.js
+!src/hook-runner.js
 !src/task-scheduler.js
 !test/
 !test/app-commands.test.js
@@ -32,6 +35,7 @@
 !.cursor/
 .cursor/*
 !.cursor/hooks.json
+!.cursor/hooks.json.example
 !.cursor/hooks/
 .cursor/hooks/*
 !.cursor/hooks/*.sh

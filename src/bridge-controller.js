@@ -19,15 +19,18 @@ export const BOT_COMMANDS = [
   { command: 'memory', description: '查看项目记忆 / Show project memory' },
   { command: 'clear',  description: '重置会话 / Reset session' },
   { command: 'tasks',  description: '查看定时任务 / List scheduled tasks' },
+  { command: 'voice',  description: '切换语音回复 / Toggle voice reply' },
 ];
 
 export class BridgeController {
-  constructor({ channelAdapter, cursorSessions, scheduler }) {
+  constructor({ channelAdapter, cursorSessions, scheduler, elevenLabs }) {
     this.channelAdapter = channelAdapter;
     this.cursorSessions = cursorSessions;
     this.scheduler = scheduler;
+    this.elevenLabs = elevenLabs || null;
     this.pendingInteractions = new Map();
     this.latestTargets = new Map();
+    this.voiceMode = new Map();
     this.appCommandExecutor = new AppCommandExecutor({
       scheduler,
       cursorSessions,
@@ -123,6 +126,8 @@ export class BridgeController {
       });
       const finalText = composeFinalText(parsed.visibleText, parsed.parseError, commandMessages);
       await stream.finalize(finalText);
+
+      this._maybeSendVoice(message, finalText);
     } catch (error) {
       console.error('[Bridge] Error:', { scopeKey: message.scopeKey, error });
       await stream.fail('处理失败: ' + error.message);
@@ -246,6 +251,8 @@ export class BridgeController {
         return this.cmdClear(message);
       case 'tasks':
         return this.cmdTasks(message);
+      case 'voice':
+        return this.cmdVoice(message);
       default:
         return false;
     }
@@ -342,5 +349,43 @@ export class BridgeController {
     }
     await this.channelAdapter.replyText(message, lines.join('\n'));
     return true;
+  }
+
+  async cmdVoice(message) {
+    if (!this.elevenLabs?.enabled) {
+      await this.channelAdapter.replyText(message, '⚠️ 语音功能未配置（需要 ELEVENLABS_API_KEY）');
+      return true;
+    }
+    const current = this.voiceMode.get(message.scopeKey) || false;
+    this.voiceMode.set(message.scopeKey, !current);
+    const status = !current ? '🔊 语音回复已开启' : '🔇 语音回复已关闭';
+    await this.channelAdapter.replyText(message, status);
+    return true;
+  }
+
+  _maybeSendVoice(message, text) {
+    if (!this.elevenLabs?.enabled) return;
+    if (!this.voiceMode.get(message.scopeKey)) return;
+    if (!text || text.length < 5 || text.length > 4000) return;
+
+    const plainText = text
+      .replace(/```[\s\S]*?```/g, '')
+      .replace(/`[^`]+`/g, '')
+      .replace(/[#*_~\[\]()>|]/g, '')
+      .trim();
+
+    if (!plainText || plainText.length < 5) return;
+
+    const ttsText = plainText.length > 2000 ? plainText.slice(0, 2000) + '...' : plainText;
+
+    this.elevenLabs.synthesize(ttsText, { outputFormat: 'mp3_22050_32' })
+      .then(({ buffer }) => {
+        if (this.channelAdapter.sendAudio) {
+          return this.channelAdapter.sendAudio(message.target, buffer);
+        }
+      })
+      .catch((err) => {
+        console.error('[Bridge] TTS/send audio failed:', err.message);
+      });
   }
 }

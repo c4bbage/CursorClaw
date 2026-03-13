@@ -1,11 +1,13 @@
 import { EventEmitter } from 'events';
 import { CursorBridge } from './cursor-bridge.js';
+import { HookRunner } from './hook-runner.js';
 
 export class CursorSessionManager extends EventEmitter {
   constructor(options = {}) {
     super();
     this.cwd = options.cwd || process.cwd();
     this.mcpServers = options.mcpServers;
+    this.hookRunner = options.hookRunner !== false ? new HookRunner({ projectDir: this.cwd }) : null;
     this.bridgeFactory = options.bridgeFactory || ((bridgeOptions) => new CursorBridge(bridgeOptions));
     this.sessions = new Map();
     this.sessionPromises = new Map();
@@ -38,6 +40,7 @@ export class CursorSessionManager extends EventEmitter {
     const bridge = this.bridgeFactory({
       cwd: this.cwd,
       mcpServers: this.mcpServers,
+      hookRunner: this.hookRunner,
       clientInfo: {
         name: `channel-bridge:${scopeKey}`,
         version: '0.1.0'

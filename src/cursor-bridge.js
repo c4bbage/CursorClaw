@@ -5,19 +5,32 @@ import { APP_COMMANDS_INSTRUCTIONS } from './app-commands.js';
 
 const DEFAULT_PROMPT_TIMEOUT_MS = 5 * 60 * 1000;
 
+const SHELL_TOOLS = new Set(['Shell', 'shell']);
+const READ_TOOLS = new Set(['Read', 'read', 'Glob', 'Grep', 'SemanticSearch']);
+const WRITE_TOOLS = new Set(['Write', 'StrReplace', 'EditNotebook', 'Delete']);
+
+function isMcpTool(name) {
+  return name?.startsWith('MCP:') || name?.includes('mcp_') || name?.includes('/');
+}
+
 export class CursorBridge extends EventEmitter {
   constructor(options = {}) {
     super();
     this.cwd = options.cwd || process.cwd();
     this.mcpServers = options.mcpServers;
+    this.hookRunner = options.hookRunner || null;
     this.clientInfo = options.clientInfo || { name: 'feishu-cursor-bridge', version: '0.1.0' };
     this.promptTimeoutMs = options.promptTimeoutMs || DEFAULT_PROMPT_TIMEOUT_MS;
     this.process = null;
     this.nextId = 1;
     this.pending = new Map();
     this.sessionId = null;
+    this.hookContext = '';
     this.promptQueue = Promise.resolve();
     this.activePrompt = null;
+    this._thoughtBuffer = '';
+    this._thoughtStartMs = 0;
+    this._sessionStartMs = 0;
   }
 
   start() {
@@ -43,6 +56,15 @@ export class CursorBridge extends EventEmitter {
 
       this.process.on('close', (code) => {
         console.log('[Cursor] Process exited:', code);
+        if (this.hookRunner) {
+          const durationMs = this._sessionStartMs ? Date.now() - this._sessionStartMs : 0;
+          this.hookRunner.fireSessionEnd({
+            conversationId: this.sessionId,
+            sessionId: this.sessionId,
+            reason: code === 0 ? 'completed' : 'error',
+            durationMs
+          }).catch(() => {});
+        }
         this.emit('close', { code, sessionId: this.sessionId });
       });
 
@@ -63,8 +85,22 @@ export class CursorBridge extends EventEmitter {
     await this.send('authenticate', { methodId: 'cursor_login' });
     const { sessionId } = await this.send('session/new', this.buildSessionParams());
     this.sessionId = sessionId;
+    this._sessionStartMs = Date.now();
     console.log('[Cursor] Session ready:', sessionId);
+
+    if (this.hookRunner) {
+      const { additionalContext } = await this.hookRunner.fireSessionStart({
+        conversationId: sessionId,
+        sessionId
+      });
+      if (additionalContext) {
+        this.hookContext = additionalContext;
+        console.log('[Cursor] Hook injected context:', additionalContext.length, 'chars');
+      }
+    }
   }
+
+  // ── message router ──────────────────────────────────────────────
 
   handleMessage(msg) {
     const isResponse = msg.id != null && !msg.method;
@@ -80,34 +116,12 @@ export class CursorBridge extends EventEmitter {
     }
 
     if (msg.method === 'session/update') {
-      const update = msg.params?.update;
-      const updateType = update?.sessionUpdate;
-
-      if (updateType === 'agent_message_chunk' && update.content?.text) {
-        if (this.activePrompt?.onChunk) {
-          this.activePrompt.onChunk(update.content.text);
-        }
-        this.emit('chunk', update.content.text);
-      } else if (updateType === 'tool_call') {
-        const toolName = update.toolName || update.tool?.name || '';
-        console.log('[Cursor] Tool call:', toolName);
-        if (this.activePrompt?.onToolStatus) {
-          this.activePrompt.onToolStatus(toolName);
-        }
-        this.emit('tool_status', { type: 'tool_call', toolName });
-      } else if (updateType === 'tool_call_update') {
-        // silently consume intermediate tool progress
-      } else {
-        console.log('[Cursor] Session update:', updateType || 'unknown');
-      }
+      this._handleSessionUpdate(msg.params?.update);
       return;
     }
 
     if (msg.method === 'session/request_permission') {
-      console.log('[Cursor] Permission request: id=', msg.id, 'tool=', msg.params?.toolName || msg.params?.permissions?.[0]?.tool || 'unknown');
-      this.respond(msg.id, {
-        outcome: { outcome: 'selected', optionId: 'allow-once' }
-      });
+      this._handlePermissionRequest(msg);
       return;
     }
 
@@ -115,7 +129,7 @@ export class CursorBridge extends EventEmitter {
     if (isCursorEvent) {
       const normalizedMethod = msg.method.replace(/^_cursor\//, 'cursor/');
       console.log('[Cursor] Extension event:', msg.method, '→', normalizedMethod, 'id=', msg.id);
-      this.emit('cursor_event', { ...msg, method: normalizedMethod });
+      this._handleCursorEvent(msg, normalizedMethod);
       return;
     }
 
@@ -127,6 +141,195 @@ export class CursorBridge extends EventEmitter {
 
     console.log('[Cursor] Ignored message:', JSON.stringify(msg));
   }
+
+  // ── session/update handling ─────────────────────────────────────
+
+  _handleSessionUpdate(update) {
+    const updateType = update?.sessionUpdate;
+
+    if (updateType === 'agent_message_chunk' && update.content?.text) {
+      this._flushThought();
+      if (this.activePrompt?.onChunk) {
+        this.activePrompt.onChunk(update.content.text);
+      }
+      this.emit('chunk', update.content.text);
+      return;
+    }
+
+    if (updateType === 'agent_thought_chunk') {
+      const text = update.content?.text || update.text || '';
+      if (text) {
+        if (!this._thoughtBuffer) {
+          this._thoughtStartMs = Date.now();
+        }
+        this._thoughtBuffer += text;
+      }
+      return;
+    }
+
+    if (updateType === 'tool_call') {
+      this._flushThought();
+      const toolName = update.toolName || update.tool?.name || '';
+      const toolInput = update.toolInput || update.tool?.input || {};
+      console.log('[Cursor] Tool call:', toolName);
+
+      if (this.activePrompt?.onToolStatus) {
+        this.activePrompt.onToolStatus(toolName);
+      }
+      this.emit('tool_status', { type: 'tool_call', toolName });
+
+      this._fireToolHooks(toolName, toolInput);
+      return;
+    }
+
+    if (updateType === 'tool_call_update') {
+      return;
+    }
+
+    console.log('[Cursor] Session update:', updateType || 'unknown');
+  }
+
+  _flushThought() {
+    if (!this._thoughtBuffer || !this.hookRunner) return;
+    const text = this._thoughtBuffer;
+    const durationMs = Date.now() - this._thoughtStartMs;
+    this._thoughtBuffer = '';
+    this._thoughtStartMs = 0;
+
+    this.hookRunner.fireAfterAgentThought({
+      conversationId: this.sessionId,
+      text,
+      durationMs
+    }).catch(() => {});
+  }
+
+  // ── permission request → preToolUse / before* hooks ─────────────
+
+  async _handlePermissionRequest(msg) {
+    const toolName = msg.params?.toolName || msg.params?.permissions?.[0]?.tool || '';
+    const toolInput = msg.params?.toolInput || msg.params?.permissions?.[0]?.input || {};
+    console.log('[Cursor] Permission request: id=', msg.id, 'tool=', toolName);
+
+    if (!this.hookRunner) {
+      this.respond(msg.id, { outcome: { outcome: 'selected', optionId: 'allow-once' } });
+      return;
+    }
+
+    try {
+      const { denied: preToolDenied } = await this.hookRunner.firePreToolUse({
+        conversationId: this.sessionId,
+        toolName,
+        toolInput
+      });
+      if (preToolDenied) {
+        console.log('[Cursor] preToolUse hook denied:', toolName);
+        this.respond(msg.id, { outcome: { outcome: 'selected', optionId: 'reject-once' } });
+        return;
+      }
+
+      let specificDenied = false;
+
+      if (SHELL_TOOLS.has(toolName)) {
+        const cmd = toolInput?.command || toolInput?.cmd || '';
+        const result = await this.hookRunner.fireBeforeShellExecution({
+          conversationId: this.sessionId,
+          command: cmd,
+          cwd: toolInput?.working_directory || toolInput?.cwd || this.cwd
+        });
+        specificDenied = result.denied;
+      } else if (READ_TOOLS.has(toolName)) {
+        const result = await this.hookRunner.fireBeforeReadFile({
+          conversationId: this.sessionId,
+          filePath: toolInput?.path || toolInput?.file_path || '',
+          content: ''
+        });
+        specificDenied = result.denied;
+      } else if (isMcpTool(toolName)) {
+        const result = await this.hookRunner.fireBeforeMCPExecution({
+          conversationId: this.sessionId,
+          toolName,
+          toolInput
+        });
+        specificDenied = result.denied;
+      }
+
+      if (specificDenied) {
+        console.log('[Cursor] Specific before-hook denied:', toolName);
+        this.respond(msg.id, { outcome: { outcome: 'selected', optionId: 'reject-once' } });
+        return;
+      }
+
+      this.respond(msg.id, { outcome: { outcome: 'selected', optionId: 'allow-once' } });
+    } catch (err) {
+      console.error('[Cursor] Permission hook error, allowing:', err.message);
+      this.respond(msg.id, { outcome: { outcome: 'selected', optionId: 'allow-once' } });
+    }
+  }
+
+  // ── post-tool hooks by category ─────────────────────────────────
+
+  _fireToolHooks(toolName, toolInput) {
+    if (!this.hookRunner) return;
+    const convId = this.sessionId;
+
+    this.hookRunner.firePostToolUse({
+      conversationId: convId,
+      toolName,
+      toolInput
+    }).catch(() => {});
+
+    if (SHELL_TOOLS.has(toolName)) {
+      this.hookRunner.fireAfterShellExecution({
+        conversationId: convId,
+        command: toolInput?.command || toolInput?.cmd || ''
+      }).catch(() => {});
+    } else if (WRITE_TOOLS.has(toolName)) {
+      this.hookRunner.fireAfterFileEdit({
+        conversationId: convId,
+        filePath: toolInput?.path || toolInput?.file_path || '',
+        edits: toolInput?.old_string
+          ? [{ old_string: toolInput.old_string, new_string: toolInput.new_string || '' }]
+          : []
+      }).catch(() => {});
+    } else if (isMcpTool(toolName)) {
+      this.hookRunner.fireAfterMCPExecution({
+        conversationId: convId,
+        toolName,
+        toolInput
+      }).catch(() => {});
+    }
+  }
+
+  // ── cursor/* extension events → subagent hooks ──────────────────
+
+  _handleCursorEvent(msg, normalizedMethod) {
+    this.emit('cursor_event', { ...msg, method: normalizedMethod });
+
+    if (!this.hookRunner) return;
+    const params = msg.params || {};
+
+    if (normalizedMethod === 'cursor/task') {
+      if (params.status === 'running' || params.state === 'started') {
+        this.hookRunner.fireSubagentStart({
+          conversationId: this.sessionId,
+          subagentId: params.taskId || params.id || '',
+          subagentType: params.subagentType || params.type || 'generalPurpose',
+          task: params.description || params.task || '',
+          subagentModel: params.model || ''
+        }).catch(() => {});
+      } else if (params.status === 'completed' || params.status === 'error' || params.state === 'stopped') {
+        this.hookRunner.fireSubagentStop({
+          conversationId: this.sessionId,
+          subagentType: params.subagentType || params.type || 'generalPurpose',
+          status: params.status || 'completed',
+          task: params.description || params.task || '',
+          summary: params.summary || params.result || ''
+        }).catch(() => {});
+      }
+    }
+  }
+
+  // ── transport ───────────────────────────────────────────────────
 
   send(method, params) {
     const id = this.nextId++;
@@ -145,6 +348,8 @@ export class CursorBridge extends EventEmitter {
     );
   }
 
+  // ── prompt ──────────────────────────────────────────────────────
+
   async prompt(message, options = {}) {
     const runPrompt = async () => {
       if (message.trim() === '/new') {
@@ -153,7 +358,22 @@ export class CursorBridge extends EventEmitter {
         return { text: '✓ 新会话已创建', stopReason: 'new_session' };
       }
 
-      const systemPrompt = `${APP_COMMANDS_INSTRUCTIONS}
+      if (this.hookRunner) {
+        const { blocked, userMessage } = await this.hookRunner.fireBeforeSubmitPrompt({
+          conversationId: this.sessionId,
+          prompt: message
+        });
+        if (blocked) {
+          console.log('[Cursor] beforeSubmitPrompt blocked:', userMessage);
+          return { text: userMessage || '⛔ Prompt blocked by hook', stopReason: 'hook_blocked' };
+        }
+      }
+
+      const contextBlock = this.hookContext
+        ? `\n\n--- Hook Context ---\n${this.hookContext}\n--- End Hook Context ---\n`
+        : '';
+
+      const systemPrompt = `${APP_COMMANDS_INSTRUCTIONS}${contextBlock}
 
 用户消息：
 ${message}`;
@@ -205,19 +425,23 @@ ${message}`;
           })
         ]);
 
+        this._flushThought();
+
         const text = fullResponse || this.extractTextFromResult(result);
+        const stopReason = result?.stopReason || 'unknown';
         console.log('[Cursor] Prompt complete:', {
           sessionId: this.sessionId,
-          stopReason: result?.stopReason || 'unknown',
+          stopReason,
           chunkCount,
           responseLength: text.length
         });
         this.emit('response', text);
-        return {
-          text,
-          stopReason: result?.stopReason || 'unknown'
-        };
+
+        this._firePostPromptHooks(text, stopReason);
+
+        return { text, stopReason };
       } catch (error) {
+        this._flushThought();
         if (error.message?.includes('timed out') && fullResponse) {
           console.warn('[Cursor] Prompt timed out but has partial response:', {
             sessionId: this.sessionId,
@@ -237,6 +461,23 @@ ${message}`;
     this.promptQueue = queuedPrompt.then(() => undefined, () => undefined);
     return queuedPrompt;
   }
+
+  _firePostPromptHooks(text, stopReason) {
+    if (!this.hookRunner) return;
+    const convId = this.sessionId || 'unknown';
+
+    this.hookRunner.fireAfterAgentResponse({
+      conversationId: convId,
+      text
+    }).catch((err) => console.error('[HookRunner] afterAgentResponse error:', err.message));
+
+    this.hookRunner.fireStop({
+      conversationId: convId,
+      status: stopReason === 'end_turn' ? 'completed' : stopReason
+    }).catch((err) => console.error('[HookRunner] stop error:', err.message));
+  }
+
+  // ── helpers ─────────────────────────────────────────────────────
 
   extractTextFromResult(result) {
     if (!result) {
