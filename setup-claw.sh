@@ -359,7 +359,7 @@ HOOK
 
 write_if_missing "$TARGET_DIR/hooks/session-summary.sh" <<'HOOK'
 #!/bin/bash
-set -euo pipefail
+set -uo pipefail
 
 INPUT=$(cat)
 
@@ -370,8 +370,8 @@ LOG_ROOT="${PROJECT_DIR}/.cursor/logs"
 TODAY=$(date +%Y-%m-%d)
 NOW_TIME=$(date +%H:%M)
 
-CONV_ID=$(echo "$INPUT" | jq -r '.conversation_id // "unknown"')
-STATUS=$(echo "$INPUT" | jq -r '.status // "unknown"')
+CONV_ID=$(echo "$INPUT" | jq -r '.conversation_id // "unknown"' 2>/dev/null || echo "unknown")
+STATUS=$(echo "$INPUT" | jq -r '.status // "unknown"' 2>/dev/null || echo "unknown")
 
 CONV_LOG_DIR="${LOG_ROOT}/${TODAY}/${CONV_ID}"
 
@@ -385,13 +385,13 @@ SUMMARY=""
 
 if [ -f "${CONV_LOG_DIR}/tools.jsonl" ]; then
   TOOL_COUNT=$(wc -l < "${CONV_LOG_DIR}/tools.jsonl" | tr -d ' ')
-  TOOLS_USED=$(jq -r '.tool' "${CONV_LOG_DIR}/tools.jsonl" 2>/dev/null | sort -u | head -10 | paste -sd ", " -)
+  TOOLS_USED=$(jq -r '.tool // empty' "${CONV_LOG_DIR}/tools.jsonl" 2>/dev/null | sort -u | head -10 | paste -sd ", " - 2>/dev/null || echo "")
   [ -n "$TOOLS_USED" ] && SUMMARY="${SUMMARY}- Tools (${TOOL_COUNT} calls): ${TOOLS_USED}\n"
 fi
 
 if [ -f "${CONV_LOG_DIR}/responses.jsonl" ]; then
   RESP_COUNT=$(wc -l < "${CONV_LOG_DIR}/responses.jsonl" | tr -d ' ')
-  LAST_RESPONSE=$(tail -1 "${CONV_LOG_DIR}/responses.jsonl" | jq -r '.text // ""' 2>/dev/null | head -c 200)
+  LAST_RESPONSE=$(tail -1 "${CONV_LOG_DIR}/responses.jsonl" | jq -r '.text // ""' 2>/dev/null || echo "")
   SUMMARY="${SUMMARY}- Responses: ${RESP_COUNT} total\n"
   if [ -n "$LAST_RESPONSE" ]; then
     LAST_LINE=$(echo "$LAST_RESPONSE" | head -1 | head -c 120)

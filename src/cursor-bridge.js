@@ -174,9 +174,9 @@ export class CursorBridge extends EventEmitter {
 
     if (updateType === 'tool_call') {
       this._flushThought();
-      const toolName = update.toolName || update.tool?.name || '';
-      const toolInput = update.toolInput || update.tool?.input || {};
-      console.log('[Cursor] Tool call:', toolName);
+      const toolName = update.toolName || update.tool_name || update.name || update.tool?.name || '';
+      const toolInput = update.toolInput || update.tool_input || update.input || update.tool?.input || {};
+      console.log('[Cursor] Tool call:', toolName, 'keys:', Object.keys(update));
 
       if (this.activePrompt?.onToolStatus) {
         this.activePrompt.onToolStatus(toolName);
