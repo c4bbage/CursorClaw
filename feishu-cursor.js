@@ -22,7 +22,8 @@ const feishu = new FeishuAdapter({
 });
 
 const cursorSessions = new CursorSessionManager({
-  cwd: projectDir
+  cwd: projectDir,
+  model: process.env.CURSOR_MODEL || null
 });
 const scheduler = new TaskScheduler();
 const controller = new BridgeController({

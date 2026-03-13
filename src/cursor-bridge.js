@@ -18,6 +18,7 @@ export class CursorBridge extends EventEmitter {
     super();
     this.cwd = options.cwd || process.cwd();
     this.mcpServers = options.mcpServers;
+    this.model = options.model || null;
     this.hookRunner = options.hookRunner || null;
     this.clientInfo = options.clientInfo || { name: 'feishu-cursor-bridge', version: '0.1.0' };
     this.promptTimeoutMs = options.promptTimeoutMs || DEFAULT_PROMPT_TIMEOUT_MS;
@@ -35,7 +36,11 @@ export class CursorBridge extends EventEmitter {
 
   start() {
     return new Promise((resolve, reject) => {
-      this.process = spawn('agent', ['acp'], {
+      const args = ['acp'];
+      if (this.model) {
+        args.push('--model', this.model);
+      }
+      this.process = spawn('agent', args, {
         stdio: ['pipe', 'pipe', 'inherit']
       });
 

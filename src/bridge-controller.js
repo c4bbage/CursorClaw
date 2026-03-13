@@ -367,8 +367,10 @@ export class BridgeController {
     const targets = this.channelAdapter.getNotifyTargets();
     if (targets.length === 0) return;
 
-    const cwd = process.cwd().split('/').pop();
+    const projectDir = this.cursorSessions.cwd || process.cwd();
+    const projectName = projectDir.split('/').pop();
     const channel = this.channelAdapter.channelId;
+    const model = this.cursorSessions.model || 'default';
     const voice = this.elevenLabs?.enabled ? '✅' : '❌';
     const hookRunner = this.cursorSessions.hookRunner;
     const hookCount = hookRunner?.hookCount ?? 0;
@@ -377,8 +379,9 @@ export class BridgeController {
     const greeting = [
       `🤖 CursorClaw Bridge Online`,
       ``,
-      `📂 Project: ${cwd}`,
+      `📂 Project: ${projectName}`,
       `📡 Channel: ${channel}`,
+      `🧠 Model: ${model}`,
       `🪝 Hooks: ${hookCount} events configured`,
       `🎙️ Voice: ${voice}`,
       `⏰ Time: ${now}`,
