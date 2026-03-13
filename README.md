@@ -10,6 +10,22 @@ CursorClaw Bridge 将即时通讯平台接入 [Cursor ACP 协议](https://cursor
 
 ---
 
+## Philosophy / 理念
+
+We live in an era of incredibly powerful AI agents — Cursor, Claude Code, Codex, Gemini CLI, and more arriving every month. Each has unique strengths: deep codebase understanding, long-context reasoning, multimodal input, or blazing speed. The smart move isn't to pick one and ignore the rest — it's to **build bridges that let you harness all of them**.
+
+CursorClaw is exactly that kind of bridge. Instead of being locked into a single IDE window, you get Cursor's full agent capabilities wherever you are — on your phone via Telegram, in a team chat on Feishu, or through a scheduled cron job at 3 AM. The Rules, Hooks, and Memory you invest in aren't wasted on one tool; they travel with you across interfaces.
+
+The best developers in the AI era won't be the ones who master one agent. They'll be the ones who **compose agents into workflows** — letting each do what it does best, while keeping a unified memory and rule system that makes the whole greater than the sum of its parts.
+
+我们正处在 AI Agent 爆发的时代——Cursor、Claude Code、Codex、Gemini CLI，每个月都有新的强大工具出现。每个都有独特优势：深度代码理解、长上下文推理、多模态输入、极致速度。聪明的做法不是选一个然后忽略其他，而是**搭建桥梁，借用所有工具的能力**。
+
+CursorClaw 就是这样一座桥。不再局限于 IDE 窗口，你可以在手机上通过 Telegram、在团队飞书群里、甚至通过凌晨三点的定时任务来使用 Cursor 的全部 Agent 能力。你在 Rules、Hooks 和 Memory 上的投入不会被锁死在某一个工具里，它们跟着你跨越所有界面。
+
+AI 时代最强的开发者，不是精通某一个 Agent 的人，而是**善于把多个 Agent 编排成工作流**的人——让每个工具做它最擅长的事，同时保持统一的记忆和规则系统，让整体大于部分之和。
+
+---
+
 ## Features / 功能
 
 | Feature / 功能 | Description / 说明 |
