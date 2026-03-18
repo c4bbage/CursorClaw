@@ -25,6 +25,29 @@ export class AppCommandExecutor {
     this.channelAdapter = channelAdapter;
   }
 
+  restoreTasks() {
+    const defs = this.scheduler.getSavedDefs();
+    let restored = 0;
+    for (const [fullTaskId, def] of defs) {
+      const context = { scopeKey: def.scopeKey, target: def.target };
+      this.scheduler.schedule(fullTaskId, def.cron, async () => {
+        const scheduledResult = await this.cursorSessions.prompt(def.scopeKey, def.prompt);
+        const scheduledParsed = parseAppResponse(scheduledResult.text);
+        const scheduledCommandMessages = await this.execute(scheduledParsed.commands, context);
+        const outboundText = composeFinalText(
+          scheduledParsed.visibleText,
+          scheduledParsed.parseError,
+          scheduledCommandMessages
+        );
+        await this.channelAdapter.sendText(def.target, outboundText);
+      });
+      restored++;
+    }
+    if (restored > 0) {
+      console.log(`[Task] Restored ${restored} tasks from disk`);
+    }
+  }
+
   async execute(commands, context) {
     const messages = [];
 
@@ -35,7 +58,8 @@ export class AppCommandExecutor {
       });
 
       if (command.type === 'schedule_task') {
-        this.scheduler.schedule(`${context.scopeKey}:${command.taskId}`, command.cron, async () => {
+        const fullTaskId = `${context.scopeKey}:${command.taskId}`;
+        this.scheduler.schedule(fullTaskId, command.cron, async () => {
           const scheduledResult = await this.cursorSessions.prompt(context.scopeKey, command.prompt);
           const scheduledParsed = parseAppResponse(scheduledResult.text);
           const scheduledCommandMessages = await this.execute(scheduledParsed.commands, context);
@@ -45,6 +69,11 @@ export class AppCommandExecutor {
             scheduledCommandMessages
           );
           await this.channelAdapter.sendText(context.target, outboundText);
+        }, {
+          taskId: command.taskId,
+          scopeKey: context.scopeKey,
+          prompt: command.prompt,
+          target: context.target
         });
         messages.push(`已创建定时任务：${command.taskId} (${command.cron})`);
         continue;

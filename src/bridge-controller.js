@@ -38,6 +38,10 @@ export class BridgeController {
     });
   }
 
+  restoreTasks() {
+    this.appCommandExecutor.restoreTasks();
+  }
+
   attach() {
     this.channelAdapter.on('message', (message) => {
       this.handleMessage(message).catch((error) => {

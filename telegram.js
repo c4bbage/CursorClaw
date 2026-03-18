@@ -20,7 +20,7 @@ const telegram = new TelegramAdapter({
 const cursorSessions = new CursorSessionManager({
   cwd: process.cwd()
 });
-const scheduler = new TaskScheduler();
+const scheduler = new TaskScheduler('data/tasks-telegram.json');
 const controller = new BridgeController({
   channelAdapter: telegram,
   cursorSessions,
@@ -29,6 +29,7 @@ const controller = new BridgeController({
 });
 
 controller.attach();
+controller.restoreTasks();
 
 await telegram.start();
 console.log('Telegram ↔ Cursor Bridge started!');

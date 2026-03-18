@@ -21,7 +21,7 @@ const feishu = new FeishuAdapter({
 const cursorSessions = new CursorSessionManager({
   cwd: process.cwd()
 });
-const scheduler = new TaskScheduler();
+const scheduler = new TaskScheduler('data/tasks-feishu.json');
 const controller = new BridgeController({
   channelAdapter: feishu,
   cursorSessions,
@@ -30,6 +30,7 @@ const controller = new BridgeController({
 });
 
 controller.attach();
+controller.restoreTasks();
 
 await feishu.start();
 
