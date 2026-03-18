@@ -373,7 +373,16 @@ export class CursorBridge extends EventEmitter {
         ? `\n\n--- Hook Context ---\n${this.hookContext}\n--- End Hook Context ---\n`
         : '';
 
+      const now = new Date();
+      const timeStr = now.toLocaleString('zh-CN', {
+        timeZone: 'Asia/Shanghai',
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', weekday: 'long'
+      });
+
       const systemPrompt = `${APP_COMMANDS_INSTRUCTIONS}${contextBlock}
+
+当前时间: ${timeStr}
 
 用户消息：
 ${message}`;
