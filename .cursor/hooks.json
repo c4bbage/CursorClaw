@@ -6,6 +6,7 @@
       { "command": ".cursor/hooks/session-memory.sh" }
     ],
     "stop": [
+      { "command": ".cursor/hooks/harness-check.sh" },
       { "command": ".cursor/hooks/session-summary.sh" }
     ],
     "sessionEnd": [

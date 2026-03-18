@@ -1,6 +1,11 @@
 ---
 description: Tool and dependency conventions for this project
-alwaysApply: true
+alwaysApply: false
+globs:
+  - "src/**"
+  - "feishu-cursor.js"
+  - "telegram.js"
+  - "package.json"
 ---
 
 # CursorClaw — Tools & Dependencies
