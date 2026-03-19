@@ -183,28 +183,105 @@ IDE 里写了一个 Hook → Bridge 自动触发。
 
 ---
 
-## 六、工作站继承：三层配置链
+## 六、记忆系统：OpenClaw 的设计与 CursorClaw 的对照实现
 
-AI 辅助开发最难的不是让 Agent 变聪明——而是让它**记住**和**共享**学到的东西。
+AI 辅助开发最难的不是让 Agent 变聪明——而是让它**记住**和**共享**学到的东西。OpenClaw 在这方面做了开创性的设计，CursorClaw 借鉴了其核心理念，但用 Cursor 原生能力重新实现。
+
+### OpenClaw 的记忆架构
+
+OpenClaw 采用**文件优先（File-First）**的记忆架构，用纯 Markdown 文件承载认知状态：
 
 ```
-~/.cursor/rules/          ← 用户级：你的个人风格（跟着你走）
-        ↓ (自动合并)
-.cursor/rules/*.mdc       ← 项目级：团队知识（提交到 git）
-        ↓ (自动合并)
-memory/MEMORY.md          ← 长期记忆：架构决策、约定
-        ↓ (hooks 注入)
-memory/YYYY-MM-DD.md      ← 每日日志：会话级学习（自动生成）
+~/.openclaw/workspace/
+├── SOUL.md          # 人格宪法：性格、价值观、不可违反的约束
+├── AGENTS.md        # 操作手册：优先级、边界、工作流、质量标准
+├── USER.md          # 用户偏好：语言、风格、常用工具
+├── MEMORY.md        # 长期记忆：压缩过的历史事实
+└── memory/
+    ├── 2026-03-13.md  # 今日笔记
+    └── 2026-03-12.md  # 昨日笔记
 ```
 
-**实际效果：**
+**会话启动协议：** Agent 每次启动必须按顺序读取 SOUL.md → USER.md → AGENTS.md → MEMORY.md → 今日 + 昨日笔记，然后才能响应用户。这是一个"反 RAG"设计——不做检索，而是**全量加载认知栈**，用 token 成本换来人格一致性。
 
-- **新人入职** → `git clone` → 所有项目规则 + 记忆 + hooks 就绪。**零配置。**
-- **换电脑** → `~/.cursor/rules/soul.mdc` 带着你的个人风格，项目规则从 git 来
-- **手机使用** → CursorClaw Bridge 加载完全相同的规则和记忆，不需要单独配置
-- **团队成员个性化** → 用户级 `soul.mdc` 覆盖项目级，不影响其他人
+**研究发现：** OpenClaw 团队发现嵌入式上下文（直接注入文件内容）的成功率是 100%，而让 Agent 自行决定去查找的成功率只有 53%。这个数据影响了整个行业。
 
-对比 OpenClaw 的两文件系统（`AGENTS.md` + `.agents.local.md`），CursorClaw 多了一层用户级配置，并且通过 Hooks 实现了自动注入，不需要 Agent 手动读取。
+**记忆压缩问题：** 当 AGENTS.md 超过 4KB，Agent 在真正工作之前就要消耗大量 token 读上下文。OpenClaw 正在设计 `preCompact` 钩子来自动检测溢出并触发压缩。
+
+**`agent-context` 工作流：**
+1. `init` — 创建 `.agents.local.md`（个人草稿，gitignored）
+2. 工作 — AGENTS.md 是共享的，`.agents.local.md` 是私有的
+3. 记录 — 每次会话结束提议条目：Done / Worked / Didn't Work / Decided / Learned
+4. 压缩 — 草稿超过 300 行时去重合并
+5. 晋升 — 某个 pattern 在 3+ 次会话中反复出现，提升到 AGENTS.md
+
+### CursorClaw 的对照实现
+
+CursorClaw 用 Cursor 原生的 Rules + Hooks + Memory 实现了相同的理念：
+
+```
+~/.cursor/rules/              # ← 对应 SOUL.md + USER.md
+├── soul.mdc                  #    人格、语气、边界
+└── (个人覆盖的任何 rule)
+
+.cursor/rules/                # ← 对应 AGENTS.md
+├── agents.mdc                #    项目知识、操作协议
+├── tools.mdc                 #    工具备忘、SDK 坑
+└── memory-protocol.mdc       #    记忆读写协议
+
+memory/                       # ← 对应 MEMORY.md + daily notes
+├── MEMORY.md                 #    长期记忆
+└── 2026-03-13.md             #    每日日志
+
+.cursor/hooks.json            # ← OpenClaw 没有等价物
+.cursor/hooks/
+├── session-memory.sh         #    sessionStart → 自动注入记忆
+├── session-summary.sh        #    stop → 自动写入每日日志
+└── log-event.sh              #    所有事件 → JSONL 日志
+```
+
+### 逐层对比
+
+| 层次 | OpenClaw | CursorClaw | 差异 |
+|---|---|---|---|
+| **人格** | `SOUL.md` — 手动读取 | `soul.mdc` — Cursor 自动加载（`alwaysApply: true`） | CursorClaw 不需要 Agent 主动读，IDE 和 Bridge 都自动注入 |
+| **项目知识** | `AGENTS.md` — 手动读取，120 行限制 | `agents.mdc` — 自动加载，无硬性行数限制 | OpenClaw 对行数严格控制以节省 token；Cursor Rules 的加载成本由平台承担 |
+| **个人草稿** | `.agents.local.md` — gitignored | `~/.cursor/rules/` 用户级规则 | CursorClaw 的个人覆盖是系统级的，不只是一个文件 |
+| **长期记忆** | `MEMORY.md` — Agent 手动读/写 | `memory/MEMORY.md` — Hooks 自动注入 + 规则指示写入 | 读：OpenClaw 依赖 Agent 自觉读；CursorClaw 由 `session-memory.sh` hook 强制注入 |
+| **每日笔记** | `memory/YYYY-MM-DD.md` — Agent 手动写 | `memory/YYYY-MM-DD.md` — `session-summary.sh` 自动写 | CursorClaw 的 `stop` hook 自动从 JSONL 日志提取摘要写入，不依赖 Agent 自觉 |
+| **记忆注入** | 会话启动时全量加载（消耗 token） | `sessionStart` hook 注入 `additional_context`（8KB 截断） | CursorClaw 有截断保护，不会无限膨胀上下文 |
+| **记忆压缩** | `preCompact` 钩子（规划中） | 未实现（ACP 不暴露此事件） | OpenClaw 在解决这个问题，CursorClaw 暂时依赖人工维护 MEMORY.md |
+| **记忆晋升** | `agent-context promote`（3+ 次出现自动提议） | 人工操作（从 daily log 手动搬到 MEMORY.md） | OpenClaw 更自动化；CursorClaw 可以通过写一个 hook 来实现类似逻辑 |
+| **审计日志** | 无内置 | `log-event.sh` → JSONL（thoughts、responses、tools） | CursorClaw 额外记录了 Agent 的思考过程和工具调用 |
+
+### 核心差异：主动读取 vs 被动注入
+
+OpenClaw 的记忆系统依赖**Agent 的自觉性**——AGENTS.md 里写着"你必须先读这些文件"，Agent 照做了就有上下文，不照做就没有。OpenClaw 团队的数据显示 100% 的嵌入成功率，但这是因为 AGENTS.md 本身就被平台加载了。
+
+CursorClaw 采用**双保险**：
+1. `.cursor/rules/*.mdc` 里标记 `alwaysApply: true`，Cursor 平台自动注入（和 OpenClaw 加载 AGENTS.md 等价）
+2. `sessionStart` hook 把 `memory/MEMORY.md` + 每日日志作为 `additional_context` 强制注入——**即使 Agent 忘了读文件，记忆也已经在上下文里了**
+
+这个差异在 Bridge 场景下尤其重要：通过飞书/Telegram 使用时，你没法像在 IDE 里那样观察 Agent 是否读了记忆文件。被动注入确保了**无论哪个入口，记忆都不会丢失**。
+
+### 继承链总结
+
+```
+OpenClaw:                              CursorClaw:
+
+SOUL.md (人格)                         ~/.cursor/rules/soul.mdc (用户级)
+    ↓ Agent 手动读                          ↓ 平台自动加载
+AGENTS.md (项目知识)                   .cursor/rules/agents.mdc (项目级)
+    ↓ Agent 手动读                          ↓ 平台自动加载
+.agents.local.md (个人草稿)            memory/MEMORY.md (长期记忆)
+    ↓ Agent 手动读写                        ↓ Hook 自动注入
+memory/YYYY-MM-DD.md (每日)            memory/YYYY-MM-DD.md (每日)
+    ↓ Agent 手动写                          ↓ Hook 自动写入
+```
+
+**OpenClaw 更成熟：** 记忆晋升、压缩、agent-context CLI 都是经过大规模验证的。
+
+**CursorClaw 更自动：** Hooks 让记忆的读写不依赖 Agent 自觉性，且 IDE/Bridge 用同一套机制。
 
 ---
 
