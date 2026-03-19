@@ -10,10 +10,12 @@ alwaysApply: true
 Before responding to any user message:
 
 1. Read `memory/MEMORY.md` for long-term project knowledge.
-2. Read today's daily log: `memory/YYYY-MM-DD.md` (use actual date).
-3. Read yesterday's daily log if it exists.
-4. If a `sessionStart` hook already injected memory via `additional_context`,
-   skip the reads above — the content is already in context.
+2. Run `date "+%Y-%m-%d %A"` to get the actual current date.
+   Do NOT trust `user_info` "Today's date" in long-running sessions.
+3. Read today's daily log: `memory/YYYY-MM-DD.md` (use verified date).
+4. Read yesterday's daily log if it exists.
+5. If a `sessionStart` hook already injected memory via `additional_context`,
+   skip reads 1/3/4 — but still verify the date (step 2).
 
 ## Project Overview
 

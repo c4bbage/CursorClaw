@@ -37,7 +37,6 @@ const controller = new BridgeController({
 });
 
 controller.attach();
-
 await feishu.start();
 await controller.restoreState();
 console.log(`Feishu ↔ Cursor Bridge started! (project: ${projectDir})`);

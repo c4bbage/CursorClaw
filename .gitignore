@@ -35,6 +35,8 @@
 !test/session-store.test.js
 !docs/
 !docs/*.md
+!docs/bugs/
+!docs/bugs/*.md
 !docs/images/
 !docs/images/*.png
 !.cursor/

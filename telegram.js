@@ -36,7 +36,6 @@ const controller = new BridgeController({
 });
 
 controller.attach();
-
 await telegram.start();
 await controller.restoreState();
 console.log(`Telegram ↔ Cursor Bridge started! (project: ${projectDir})`);

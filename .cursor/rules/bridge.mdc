@@ -1,5 +1,6 @@
 ---
 description: ACP bridge architecture and channel adapter conventions
+alwaysApply: false
 globs:
   - "src/**"
   - "feishu-cursor.js"

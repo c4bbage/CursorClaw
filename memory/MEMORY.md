@@ -26,15 +26,10 @@
 
 ## Resolved Bug Classes
 
-- **Falsy-value traps**: `id=0` and `result=null` are valid JSON-RPC values.
-  Always use `!= null`, never truthy checks.
-- **`_cursor/` prefix**: Extension methods arrive as both `cursor/` and
-  `_cursor/`. Normalize to `cursor/`. Unknown requests with `id` must be
-  ack'd or the agent hangs.
-- **Stream chain breakage**: Every `.then()` in the update promise chain
-  needs a `.catch()`. Missing catches prevent `finalize()` from executing.
-- **Prompt timeout**: 5-minute default. On timeout, `cancelCurrentPrompt()`
-  sends `session/cancel` and returns partial response.
+Top 3 traps (details + fix patterns in `.cursor/skills/acp-debugging.md`):
+- **Falsy-value traps**: use `!= null`, never truthy checks on `id`/`result`.
+- **Stream chain breakage**: every `.then()` needs a `.catch()`.
+- **`_cursor/` prefix**: normalize to `cursor/`; ack unknown requests with `id`.
 
 ## Conventions
 
@@ -49,11 +44,42 @@
   not recoverable (agent process dies), but hook-injected memory provides
   conversational continuity.
 
+## Skills Reference
+
+- **ACP Debugging**: `.cursor/skills/acp-debugging.md`
+  Resolved bug classes, diagnostic steps, fix patterns for CursorBridge.
+- **Self-Diagnosis**: `.cursor/skills/self-diagnosis.md`
+  Query session logs, health indicators, detect context rot.
+- **Entropy GC**: `.cursor/skills/entropy-gc.md`
+  Weekly Harness maintenance checklist (rules, memory, skills freshness).
+- **SDD Spec Template**: `.cursor/skills/sdd-spec-template.md`
+  Spec Driven Development workflow and template for new modules.
+- **Web Scraping**: `.cursor/skills/web-scraping.md`
+  4-tier Cloudflare bypass: Jina → Wayback → Chrome CDP → manual.
+- **Leader Comm Framework**: `.cursor/skills/leader-comm-framework.md`
+  Five-step method for multi-audience tech adoption materials
+  (audience segmentation → gradient metaphors → atomic capabilities →
+  capability ladder → mental anchor).
+
+## Strategic Direction
+
+- **Agent 三阶段演进**：工具期 → 分身期 → 社会期。
+  CursorClaw 当前处于工具期→分身期过渡，架构已具备分身期基础
+  （ChannelAdapter 抽象平台、scopeKey 隔离身份、memory/ 持久化上下文）。
+- **载体 vs 内核**：平台（飞书/Telegram/Cursor）是载体，
+  价值观(SOUL) + 记忆(Memory) + 技能(Skills) 才是 Agent 本体。
+- **SOUL.md 应包含价值观层**，不仅是行为规范。
+  参考李诞 OpenClaw 案例：第一条准则是"实事求是"而非功能指令。
+
 ## Milestones
 
 - 2026-03: Unified Feishu/Telegram bridge with shared BridgeController,
   ChannelAdapter base class, scopeKey isolation. Telegram on ACP main path.
 - 2026-03: CursorClaw rules system introduced — OpenClaw-inspired workspace
   with `.cursor/rules/*.mdc`, `memory/`, and lifecycle hooks.
+- 2026-03-14: Harness Engineering upgrade — conditional rule loading,
+  5 skills (acp-debugging, self-diagnosis, entropy-gc, sdd-spec, web-scraping),
+  validation stop hook (harness-check.sh). Inspired by OpenAI Harness
+  Engineering report + Julián de Angelis Agent Harness framework.
 - 2026-03: Session persistence — graceful shutdown saves state, startup
   restores targets/tasks/voice and notifies users of restart.
