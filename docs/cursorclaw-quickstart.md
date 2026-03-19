@@ -157,6 +157,60 @@ You should see:
 Telegram ↔ Cursor Bridge started!
 ```
 
+### Step 4b: Run for a Different Project / 在其他项目目录运行
+
+CursorClaw Bridge code and the target project can be in different directories. The Bridge reads `.cursor/rules`, `memory/`, and hooks from the **project directory**, not from the Bridge code directory.
+
+Bridge 代码和目标项目可以在不同目录。Bridge 从**项目目录**读取 `.cursor/rules`、`memory/` 和 hooks，而不是 Bridge 代码目录。
+
+Three ways to specify the project directory / 三种指定项目目录的方式：
+
+**Method 1: Environment variable / 环境变量**
+
+```bash
+# In .env or export
+# 在 .env 中或 export
+CURSOR_PROJECT_DIR=/path/to/your/project
+```
+
+**Method 2: Command line argument / 命令行参数**
+
+```bash
+# Pass as argument / 作为参数传递
+node telegram.js /path/to/your/project
+node feishu-cursor.js /path/to/your/project
+```
+
+**Method 3: Run from the project directory / 从项目目录运行**
+
+```bash
+cd /path/to/your/project
+node /path/to/CursorClaw/telegram.js
+```
+
+Example: Bridge code in `~/CursorClaw`, target project in `~/my-app`:
+
+例子：Bridge 代码在 `~/CursorClaw`，目标项目在 `~/my-app`：
+
+```bash
+# First, set up CursorClaw rules in the target project
+# 先在目标项目中安装 CursorClaw 规则
+cd ~/my-app
+bash ~/CursorClaw/setup-claw.sh
+
+# Then run the Bridge pointing to the target project
+# 然后启动 Bridge 指向目标项目
+cd ~/CursorClaw
+CURSOR_PROJECT_DIR=~/my-app node telegram.js
+
+# Or equivalently / 或者等价地
+node telegram.js ~/my-app
+```
+
+The agent will read `~/my-app/.cursor/rules/`, use `~/my-app/memory/`, and execute file operations in `~/my-app/`.
+
+Agent 会读取 `~/my-app/.cursor/rules/`，使用 `~/my-app/memory/`，并在 `~/my-app/` 中执行文件操作。
+
 ### Step 5: Test / 测试
 
 Send a message to your bot. The first message creates an ACP session (takes a few seconds), then you'll see streaming replies.

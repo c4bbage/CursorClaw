@@ -5,7 +5,7 @@
   "scripts": {
     "start": "node feishu-cursor.js",
     "dev": "node --watch feishu-cursor.js",
-    "test": "node --test test/app-commands.test.js test/app-command-executor.test.js test/bridge-controller.test.js test/cursor-bridge.test.js test/cursor-events.test.js test/cursor-session-manager.test.js test/bugfix-improvements.test.js",
+    "test": "node --test test/app-commands.test.js test/app-command-executor.test.js test/bridge-controller.test.js test/cursor-bridge.test.js test/cursor-events.test.js test/cursor-session-manager.test.js test/channel-adapter.test.js test/file-staging.test.js test/hook-runner.test.js test/bot-commands.test.js test/startup-greeting.test.js test/streaming-reply.test.js test/voice-mode.test.js",
     "start:telegram": "node telegram.js",
     "dev:telegram": "node --watch telegram.js"
   },

@@ -23,29 +23,7 @@ export class AppCommandExecutor {
     this.scheduler = scheduler;
     this.cursorSessions = cursorSessions;
     this.channelAdapter = channelAdapter;
-  }
-
-  restoreTasks() {
-    const defs = this.scheduler.getSavedDefs();
-    let restored = 0;
-    for (const [fullTaskId, def] of defs) {
-      const context = { scopeKey: def.scopeKey, target: def.target };
-      this.scheduler.schedule(fullTaskId, def.cron, async () => {
-        const scheduledResult = await this.cursorSessions.prompt(def.scopeKey, def.prompt);
-        const scheduledParsed = parseAppResponse(scheduledResult.text);
-        const scheduledCommandMessages = await this.execute(scheduledParsed.commands, context);
-        const outboundText = composeFinalText(
-          scheduledParsed.visibleText,
-          scheduledParsed.parseError,
-          scheduledCommandMessages
-        );
-        await this.channelAdapter.sendText(def.target, outboundText);
-      });
-      restored++;
-    }
-    if (restored > 0) {
-      console.log(`[Task] Restored ${restored} tasks from disk`);
-    }
+    this.taskDefinitions = new Map();
   }
 
   async execute(commands, context) {
@@ -59,22 +37,14 @@ export class AppCommandExecutor {
 
       if (command.type === 'schedule_task') {
         const fullTaskId = `${context.scopeKey}:${command.taskId}`;
-        this.scheduler.schedule(fullTaskId, command.cron, async () => {
-          const scheduledResult = await this.cursorSessions.prompt(context.scopeKey, command.prompt);
-          const scheduledParsed = parseAppResponse(scheduledResult.text);
-          const scheduledCommandMessages = await this.execute(scheduledParsed.commands, context);
-          const outboundText = composeFinalText(
-            scheduledParsed.visibleText,
-            scheduledParsed.parseError,
-            scheduledCommandMessages
-          );
-          await this.channelAdapter.sendText(context.target, outboundText);
-        }, {
+        this.taskDefinitions.set(fullTaskId, {
           taskId: command.taskId,
-          scopeKey: context.scopeKey,
+          cron: command.cron,
           prompt: command.prompt,
+          scopeKey: context.scopeKey,
           target: context.target
         });
+        this._scheduleTask(fullTaskId, command.cron, command.prompt, context.scopeKey, context.target);
         messages.push(`已创建定时任务：${command.taskId} (${command.cron})`);
         continue;
       }
@@ -89,8 +59,9 @@ export class AppCommandExecutor {
       }
 
       if (command.type === 'cancel_task') {
-        const taskId = `${context.scopeKey}:${command.taskId}`;
-        const success = this.scheduler.cancel(taskId);
+        const fullTaskId = `${context.scopeKey}:${command.taskId}`;
+        const success = this.scheduler.cancel(fullTaskId);
+        if (success) this.taskDefinitions.delete(fullTaskId);
         messages.push(success ? `已取消任务：${command.taskId}` : `任务不存在：${command.taskId}`);
         continue;
       }
@@ -102,6 +73,33 @@ export class AppCommandExecutor {
     }
 
     return messages;
+  }
+
+  _scheduleTask(fullTaskId, cron, prompt, scopeKey, target) {
+    this.scheduler.schedule(fullTaskId, cron, async () => {
+      const scheduledResult = await this.cursorSessions.prompt(scopeKey, prompt);
+      const scheduledParsed = parseAppResponse(scheduledResult.text);
+      const scheduledCommandMessages = await this.execute(scheduledParsed.commands, { scopeKey, target });
+      const outboundText = composeFinalText(
+        scheduledParsed.visibleText,
+        scheduledParsed.parseError,
+        scheduledCommandMessages
+      );
+      await this.channelAdapter.sendText(target, outboundText);
+    });
+  }
+
+  getTaskDefinitions() {
+    return Array.from(this.taskDefinitions.values());
+  }
+
+  restoreTasks(tasks) {
+    for (const def of tasks) {
+      const fullTaskId = `${def.scopeKey}:${def.taskId}`;
+      this.taskDefinitions.set(fullTaskId, def);
+      this._scheduleTask(fullTaskId, def.cron, def.prompt, def.scopeKey, def.target);
+      console.log('[AppCommandExecutor] Restored task:', fullTaskId, def.cron);
+    }
   }
 }
 

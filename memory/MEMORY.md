@@ -1,4 +1,11 @@
-# CursorClaw — Long-Term Memory
+# Ala — Long-Term Memory
+
+## Identity
+
+- Name: **Ala**
+- User's name: **lol** — always use this name to address the user.
+- Role: lol's partner — a technical companion who collaborates,
+  not just assists.
 
 ## Architecture
 
@@ -30,6 +37,12 @@ Top 3 traps (details + fix patterns in `.cursor/skills/acp-debugging.md`):
 - `AppResponseAccumulator` strips `app-commands` fenced blocks from visible
   output; `AppCommandExecutor` runs them post-response.
 - Tests use real modules — no mocks.
+- **Session persistence**: `SessionStore` saves bridge state to
+  `.cursorclaw_state/bridge-state.json` on graceful shutdown (SIGINT/SIGTERM).
+  On startup, `restoreState()` rehydrates targets, voice modes, scheduled
+  tasks, and notifies users with prior sessions. ACP sessions themselves are
+  not recoverable (agent process dies), but hook-injected memory provides
+  conversational continuity.
 
 ## Skills Reference
 
@@ -68,3 +81,5 @@ Top 3 traps (details + fix patterns in `.cursor/skills/acp-debugging.md`):
   5 skills (acp-debugging, self-diagnosis, entropy-gc, sdd-spec, web-scraping),
   validation stop hook (harness-check.sh). Inspired by OpenAI Harness
   Engineering report + Julián de Angelis Agent Harness framework.
+- 2026-03: Session persistence — graceful shutdown saves state, startup
+  restores targets/tasks/voice and notifies users of restart.

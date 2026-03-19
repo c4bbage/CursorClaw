@@ -4,6 +4,7 @@ import {
   buildAskQuestionResponse,
   buildCreatePlanResponse,
   formatAskQuestionMessage,
+  formatTodosMessage,
   normalizeQuestions
 } from '../src/cursor-events.js';
 
@@ -69,5 +70,19 @@ describe('Cursor ACP extension helpers', () => {
 
   it('rejects invalid plan approval text', () => {
     assert.throws(() => buildCreatePlanResponse('稍后再说'));
+  });
+
+  it('formats nested todo payloads', () => {
+    const message = formatTodosMessage({
+      update: {
+        todos: [
+          { status: 'in_progress', content: '同步 Telegram todos' },
+          { status: 'pending', content: '修复 Feishu 文件发送' }
+        ]
+      }
+    });
+
+    assert.ok(message.includes('同步 Telegram todos'));
+    assert.ok(message.includes('修复 Feishu 文件发送'));
   });
 });

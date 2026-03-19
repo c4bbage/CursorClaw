@@ -92,4 +92,19 @@ export class ChannelAdapter extends EventEmitter {
   async sendFile() {
     throw new Error(`${this.channelId} adapter must implement sendFile()`);
   }
+
+  getNotifyTargets() {
+    const targets = [];
+    if (this.allowedUsers) {
+      for (const uid of this.allowedUsers) {
+        targets.push({ channel: this.channelId, conversationKey: uid, userKey: uid });
+      }
+    }
+    if (this.allowedChats) {
+      for (const chatId of this.allowedChats) {
+        targets.push({ channel: this.channelId, conversationKey: chatId, userKey: '' });
+      }
+    }
+    return targets;
+  }
 }
