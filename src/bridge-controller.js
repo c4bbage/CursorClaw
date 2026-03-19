@@ -300,9 +300,10 @@ export class BridgeController {
   }
 
   async cmdMemory(message) {
-    const memoryPath = `${process.cwd()}/memory/MEMORY.md`;
+    const projectDir = this.cursorSessions.cwd || process.cwd();
+    const memoryPath = `${projectDir}/memory/MEMORY.md`;
     const today = new Date().toISOString().slice(0, 10);
-    const dailyPath = `${process.cwd()}/memory/${today}.md`;
+    const dailyPath = `${projectDir}/memory/${today}.md`;
 
     const parts = [];
 
@@ -340,14 +341,20 @@ export class BridgeController {
   }
 
   async cmdTasks(message) {
-    const taskList = this.scheduler.list();
-    if (taskList.length === 0) {
+    const defs = this.appCommandExecutor.getTaskDefinitions();
+    if (defs.length === 0) {
+      await this.channelAdapter.replyText(message, '当前没有定时任务。');
+      return true;
+    }
+    const prefix = `${message.scopeKey}:`;
+    const myTasks = defs.filter(d => `${d.scopeKey}:${d.taskId}`.startsWith(prefix) || d.scopeKey === message.scopeKey);
+    if (myTasks.length === 0) {
       await this.channelAdapter.replyText(message, '当前没有定时任务。');
       return true;
     }
     const lines = ['⏰ Scheduled Tasks\n'];
-    for (const task of taskList) {
-      lines.push(`• ${task.id}: ${task.cron} — ${task.description || 'N/A'}`);
+    for (const task of myTasks) {
+      lines.push(`• ${task.taskId}: ${task.cron} — ${task.prompt.slice(0, 50)}`);
     }
     await this.channelAdapter.replyText(message, lines.join('\n'));
     return true;

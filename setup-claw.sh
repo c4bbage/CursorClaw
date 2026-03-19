@@ -425,6 +425,53 @@ echo '{}'
 exit 0
 HOOK
 
+write_if_missing "$TARGET_DIR/hooks/harness-check.sh" <<'HOOK'
+#!/bin/bash
+#
+# stop hook — Harness health check
+# Validates that the Harness itself hasn't degraded during this session.
+#
+
+set -euo pipefail
+
+INPUT=$(cat)
+
+PROJECT_DIR="${CURSOR_PROJECT_DIR:-.}"
+WARNINGS=""
+
+# 1. MEMORY.md line count (max 200)
+MEMORY_FILE="${PROJECT_DIR}/memory/MEMORY.md"
+if [ -f "$MEMORY_FILE" ]; then
+  LINE_COUNT=$(wc -l < "$MEMORY_FILE" | tr -d ' ')
+  if [ "$LINE_COUNT" -gt 200 ]; then
+    WARNINGS="${WARNINGS}⚠ MEMORY.md is ${LINE_COUNT} lines (limit: 200). Consolidate stale entries.\n"
+  fi
+fi
+
+# 2. Rules total size (warn if any single file > 120 lines)
+for rule_file in "${PROJECT_DIR}"/.cursor/rules/*.mdc; do
+  [ -f "$rule_file" ] || continue
+  RLINES=$(wc -l < "$rule_file" | tr -d ' ')
+  RNAME=$(basename "$rule_file")
+  if [ "$RLINES" -gt 120 ]; then
+    WARNINGS="${WARNINGS}⚠ Rule ${RNAME} is ${RLINES} lines. Consider splitting or moving detail to docs.\n"
+  fi
+done
+
+# 3. Daily log exists for today
+TODAY=$(date +%Y-%m-%d)
+DAILY_FILE="${PROJECT_DIR}/memory/${TODAY}.md"
+if [ ! -f "$DAILY_FILE" ]; then
+  WARNINGS="${WARNINGS}⚠ No daily log for today (${TODAY}). Significant work should be captured.\n"
+fi
+
+if [ -n "$WARNINGS" ]; then
+  echo "{\"additional_context\": \"[Harness Check]\\n${WARNINGS}\"}"
+else
+  echo '{}'
+fi
+HOOK
+
 chmod +x "$TARGET_DIR/hooks/"*.sh
 
 # ─── hooks.json ────────────────────────────────────────────────────
@@ -433,10 +480,12 @@ if [ "$GLOBAL" = true ]; then
   HOOK_LOG="./hooks/log-event.sh"
   HOOK_MEM="./hooks/session-memory.sh"
   HOOK_SUM="./hooks/session-summary.sh"
+  HOOK_HC="./hooks/harness-check.sh"
 else
   HOOK_LOG=".cursor/hooks/log-event.sh"
   HOOK_MEM=".cursor/hooks/session-memory.sh"
   HOOK_SUM=".cursor/hooks/session-summary.sh"
+  HOOK_HC=".cursor/hooks/harness-check.sh"
 fi
 
 write_if_missing "$TARGET_DIR/hooks.json" <<HOOKJSON
@@ -448,6 +497,7 @@ write_if_missing "$TARGET_DIR/hooks.json" <<HOOKJSON
       { "command": "${HOOK_MEM}" }
     ],
     "stop": [
+      { "command": "${HOOK_HC}" },
       { "command": "${HOOK_SUM}" }
     ],
     "sessionEnd": [
@@ -492,6 +542,12 @@ if [ "$BRIDGE" = true ]; then
     echo "  SKIP  .env (exists / 已存在)"
   else
     write_if_missing ".env.example" <<'ENVEXAMPLE'
+# Project directory for Cursor agent (optional, defaults to cwd)
+# Cursor agent 的项目目录（可选，默认为当前目录）
+CURSOR_PROJECT_DIR=
+# Cursor model override (optional, e.g. claude-3.5-sonnet)
+CURSOR_MODEL=
+
 FEISHU_APP_ID=your_feishu_app_id
 FEISHU_APP_SECRET=your_feishu_app_secret
 # Comma-separated open_id allowlist (empty = allow all)

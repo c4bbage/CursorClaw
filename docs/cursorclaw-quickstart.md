@@ -49,7 +49,8 @@ your-project/
 │   ├── hooks/
 │   │   ├── log-event.sh          # Event logger / 事件日志
 │   │   ├── session-memory.sh     # Memory injection / 记忆注入
-│   │   └── session-summary.sh    # Session summary / 会话摘要
+│   │   ├── session-summary.sh    # Session summary / 会话摘要
+│   │   └── harness-check.sh     # Health check / 健康检查
 │   └── rules/
 │       ├── agents.mdc            # Project knowledge / 项目知识 ← customize
 │       ├── soul.mdc              # Persona & tone / 人格风格 ← customize
@@ -99,6 +100,12 @@ cp .env.example .env
 Edit `.env` with your credentials / 编辑 `.env` 填入你的凭据：
 
 ```bash
+# ── Project / 项目 ───────────────────────────
+# Optional: project directory (defaults to cwd)
+CURSOR_PROJECT_DIR=
+# Optional: model override
+CURSOR_MODEL=
+
 # ── Feishu (Lark) ─────────────────────────────
 # Create a bot at https://open.feishu.cn/app
 # 在飞书开放平台创建机器人
@@ -444,7 +451,7 @@ npm run start:telegram
      │              ┌────────┴────────┐
      │              ▼                 ▼
      │         HookRunner       SessionManager
-     │         (17/18 hooks)    (scope isolation)
+     │         (6 hook events)  (scope isolation)
      │              │                 │
      └──────────────┴────────┬────────┘
                              ▼
