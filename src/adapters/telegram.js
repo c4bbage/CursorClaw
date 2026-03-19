@@ -1,6 +1,7 @@
 import TelegramBot from 'node-telegram-bot-api';
 import { ChannelAdapter } from '../channels/channel-adapter.js';
 import { BOT_COMMANDS } from '../bridge-controller.js';
+import { buildFilePromptSection, stageInboundFile } from '../file-staging.js';
 
 const STREAM_UPDATE_INTERVAL_MS = 1200;
 const STREAM_MIN_DELTA_CHARS = 24;
@@ -227,13 +228,14 @@ function parseIdSet(envValue) {
 }
 
 export class TelegramAdapter extends ChannelAdapter {
-  constructor({ token, allowedUsers, allowedChats, elevenLabs }) {
+  constructor({ token, allowedUsers, allowedChats, elevenLabs, workspaceDir }) {
     super('telegram', {
       allowedUsers: parseIdSet(allowedUsers),
       allowedChats: parseIdSet(allowedChats)
     });
     this.bot = new TelegramBot(token, { polling: true });
     this.elevenLabs = elevenLabs || null;
+    this.workspaceDir = workspaceDir || process.cwd();
     this.setupHandlers();
   }
 
@@ -246,6 +248,15 @@ export class TelegramAdapter extends ChannelAdapter {
   }
 
   setupHandlers() {
+    this.bot.on('polling_error', (error) => {
+      const message = error?.message || '';
+      console.error('[Telegram] polling_error:', message);
+      if (message.includes('409 Conflict')) {
+        console.error('[Telegram] Another polling instance is running. Exiting current process to avoid missed updates.');
+        setTimeout(() => process.exit(1), 50);
+      }
+    });
+
     this.bot.on('message', (msg) => {
       const attachments = [];
       const largestPhoto = Array.isArray(msg.photo) && msg.photo.length > 0
@@ -260,6 +271,14 @@ export class TelegramAdapter extends ChannelAdapter {
         attachments.push({ type: 'audio', fileId: msg.voice.file_id });
       }
 
+      if (msg.document) {
+        attachments.push({
+          type: 'file',
+          fileId: msg.document.file_id,
+          fileName: msg.document.file_name || 'attachment.bin'
+        });
+      }
+
       if (!msg.text && !msg.caption && attachments.length === 0) {
         return;
       }
@@ -268,7 +287,7 @@ export class TelegramAdapter extends ChannelAdapter {
         userKey: msg.from.id.toString(),
         conversationKey: msg.chat.id.toString(),
         messageKey: msg.message_id.toString(),
-        text: msg.text || msg.caption || (largestPhoto ? '[图片]' : '[语音]'),
+        text: msg.text || msg.caption || (largestPhoto ? '[图片]' : msg.document ? `[文件] ${msg.document.file_name || ''}`.trim() : '[语音]'),
         attachments,
         raw: msg
       });
@@ -284,6 +303,7 @@ export class TelegramAdapter extends ChannelAdapter {
     let promptText = message.text || '';
     const images = message.attachments.filter((attachment) => attachment.type === 'image');
     const audios = message.attachments.filter((attachment) => attachment.type === 'audio');
+    const files = message.attachments.filter((attachment) => attachment.type === 'file');
 
     if (images.length > 0) {
       promptOptions.images = [];
@@ -320,6 +340,50 @@ export class TelegramAdapter extends ChannelAdapter {
       promptText = promptText || '用户发送了语音消息，但语音转写未配置，请提醒用户改发文字。';
     }
 
+    if (files.length > 0) {
+      const stagedFiles = [];
+      for (const file of files) {
+        try {
+          const fileUrl = await this.bot.getFileLink(file.fileId);
+          const response = await fetch(fileUrl);
+          if (!response.ok) {
+            throw new Error(`Telegram file download failed: ${response.status}`);
+          }
+          const buffer = Buffer.from(await response.arrayBuffer());
+          const staged = await stageInboundFile({
+            workspaceDir: this.workspaceDir,
+            channel: this.channelId,
+            scopeKey: message.scopeKey,
+            originalFileName: file.fileName,
+            content: buffer
+          });
+          stagedFiles.push(staged);
+          console.log('[Telegram] File staged for Cursor:', {
+            fileName: file.fileName,
+            relativePath: staged.relativePath,
+            scopeKey: message.scopeKey
+          });
+        } catch (error) {
+          console.error('[Telegram] File download failed:', {
+            fileId: file.fileId,
+            fileName: file.fileName,
+            error: error.message || error
+          });
+          stagedFiles.push({
+            relativePath: null,
+            fileName: file.fileName,
+            error: error.message || 'download failed'
+          });
+        }
+      }
+
+      const fileSection = buildFilePromptSection(stagedFiles.filter((file) => file.relativePath));
+      const failedNotes = stagedFiles
+        .filter((file) => !file.relativePath)
+        .map((file) => `用户附带了文件 ${file.fileName}，但下载失败：${file.error}`);
+      promptText = [promptText, fileSection, ...failedNotes].filter(Boolean).join('\n\n');
+    }
+
     return { promptText, promptOptions };
   }
 
@@ -354,6 +418,7 @@ export class TelegramAdapter extends ChannelAdapter {
   }
 
   async start() {
+    await this.bot.deleteWebHook().catch(() => {});
     await this.bot.setMyCommands(BOT_COMMANDS).catch((err) => {
       console.error('[Telegram] Failed to register commands:', err.message);
     });

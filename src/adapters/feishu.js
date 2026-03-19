@@ -1,10 +1,26 @@
 import { Client, WSClient, EventDispatcher } from '@larksuiteoapi/node-sdk';
 import { ChannelAdapter } from '../channels/channel-adapter.js';
+import { buildFilePromptSection, stageInboundFile } from '../file-staging.js';
 
 const STREAM_UPDATE_INTERVAL_MS = 1200;
 const STREAM_MIN_DELTA_CHARS = 24;
 const STREAM_PLACEHOLDER = '正在思考...';
 const STREAM_IN_PROGRESS_SUFFIX = '\n\n[生成中...]';
+
+function resolveFeishuReceiveTarget(targetOrUser) {
+  if (typeof targetOrUser !== 'object' || !targetOrUser) {
+    return { receiveIdType: 'open_id', receiveId: targetOrUser };
+  }
+
+  if (targetOrUser.conversationKey && targetOrUser.userKey && targetOrUser.conversationKey !== targetOrUser.userKey) {
+    return { receiveIdType: 'chat_id', receiveId: targetOrUser.conversationKey };
+  }
+
+  return {
+    receiveIdType: 'open_id',
+    receiveId: targetOrUser.userKey || targetOrUser.conversationKey
+  };
+}
 
 class FeishuStreamHandle {
   constructor(adapter, sourceMessageId) {
@@ -118,7 +134,7 @@ function parseIdSet(envValue) {
 }
 
 export class FeishuAdapter extends ChannelAdapter {
-  constructor({ appId, appSecret, allowedUsers, allowedChats, elevenLabs }) {
+  constructor({ appId, appSecret, allowedUsers, allowedChats, elevenLabs, workspaceDir }) {
     super('feishu', {
       allowedUsers: parseIdSet(allowedUsers),
       allowedChats: parseIdSet(allowedChats)
@@ -127,6 +143,7 @@ export class FeishuAdapter extends ChannelAdapter {
     this.appSecret = appSecret;
     this.client = new Client({ appId, appSecret });
     this.elevenLabs = elevenLabs || null;
+    this.workspaceDir = workspaceDir || process.cwd();
   }
 
   async start() {
@@ -155,6 +172,14 @@ export class FeishuAdapter extends ChannelAdapter {
           const fileKey = JSON.parse(message.content).file_key;
           msgData.text = '[语音]';
           msgData.attachments.push({ type: 'audio', fileKey });
+        } else if (message.message_type === 'file') {
+          const content = JSON.parse(message.content);
+          msgData.text = `[文件] ${content.file_name || ''}`.trim();
+          msgData.attachments.push({
+            type: 'file',
+            fileKey: content.file_key,
+            fileName: content.file_name || 'unknown'
+          });
         }
 
         this.emitMessage(msgData);
@@ -210,6 +235,7 @@ export class FeishuAdapter extends ChannelAdapter {
     let promptText = message.text || '';
     const images = message.attachments.filter((attachment) => attachment.type === 'image');
     const audios = message.attachments.filter((attachment) => attachment.type === 'audio');
+    const files = message.attachments.filter((attachment) => attachment.type === 'file');
 
     if (images.length > 0) {
       promptOptions.images = [];
@@ -234,6 +260,44 @@ export class FeishuAdapter extends ChannelAdapter {
       promptText = transcription || '[语音识别失败]';
     }
 
+    if (files.length > 0) {
+      const stagedFiles = [];
+      for (const file of files) {
+        try {
+          const buffer = await this.getFileBuffer(file.fileKey);
+          const staged = await stageInboundFile({
+            workspaceDir: this.workspaceDir,
+            channel: this.channelId,
+            scopeKey: message.scopeKey,
+            originalFileName: file.fileName,
+            content: buffer
+          });
+          stagedFiles.push(staged);
+          console.log('[Feishu] File staged for Cursor:', {
+            fileName: file.fileName,
+            relativePath: staged.relativePath,
+            scopeKey: message.scopeKey
+          });
+        } catch (error) {
+          console.error('[Feishu] File download failed:', {
+            fileKey: file.fileKey,
+            fileName: file.fileName,
+            error: error.message || error
+          });
+          stagedFiles.push({
+            relativePath: null,
+            fileName: file.fileName,
+            error: '下载失败，请检查飞书文件权限'
+          });
+        }
+      }
+      const fileSection = buildFilePromptSection(stagedFiles.filter((file) => file.relativePath));
+      const failedNotes = stagedFiles
+        .filter((file) => !file.relativePath)
+        .map((file) => `用户附带了文件 ${file.fileName}，但下载失败：${file.error}`);
+      promptText = [promptText, fileSection, ...failedNotes].filter(Boolean).join('\n\n');
+    }
+
     return { promptText, promptOptions };
   }
 
@@ -251,15 +315,15 @@ export class FeishuAdapter extends ChannelAdapter {
   }
 
   async sendMessage(userId, content, options = {}) {
-    const normalizedTarget = typeof userId === 'object' ? userId.userKey : userId;
+    const outbound = resolveFeishuReceiveTarget(userId);
     const response = await this.client.im.message.create({
-      params: { receive_id_type: 'open_id' },
+      params: { receive_id_type: outbound.receiveIdType },
       data: {
-        receive_id: normalizedTarget,
+        receive_id: outbound.receiveId,
         ...this.buildMessagePayload(content, options)
       }
     });
-    console.log('[Feishu] Sent message to user:', normalizedTarget, 'response:', response.data);
+    console.log('[Feishu] Sent message:', { outbound, response: response.data });
     return response;
   }
 
@@ -311,6 +375,13 @@ export class FeishuAdapter extends ChannelAdapter {
     return res.data.toString('base64');
   }
 
+  async getFileBuffer(fileKey) {
+    const res = await this.client.im.file.get({
+      path: { file_key: fileKey }
+    });
+    return Buffer.from(res.data);
+  }
+
   async transcribeAudio(fileKey) {
     try {
       const res = await this.client.speech_to_text.speech.fileRecognize({
@@ -327,7 +398,7 @@ export class FeishuAdapter extends ChannelAdapter {
   }
 
   async sendAudio(target, buffer, { fileName = 'reply.mp3' } = {}) {
-    const userId = typeof target === 'object' ? target.userKey : target;
+    const outbound = resolveFeishuReceiveTarget(target);
     const blob = new Blob([buffer], { type: 'audio/mpeg' });
     const res = await this.client.im.file.create({
       data: {
@@ -336,15 +407,15 @@ export class FeishuAdapter extends ChannelAdapter {
         file: blob
       }
     });
-    const fileKey = res?.data?.file_key;
+    const fileKey = res?.data?.file_key || res?.file_key;
     if (!fileKey) {
-      console.error('[Feishu] Audio upload failed');
+      console.error('[Feishu] Audio upload failed:', JSON.stringify(res));
       return;
     }
     await this.client.im.message.create({
-      params: { receive_id_type: 'open_id' },
+      params: { receive_id_type: outbound.receiveIdType },
       data: {
-        receive_id: userId,
+        receive_id: outbound.receiveId,
         msg_type: 'audio',
         content: JSON.stringify({ file_key: fileKey })
       }
@@ -352,7 +423,7 @@ export class FeishuAdapter extends ChannelAdapter {
   }
 
   async sendFile(targetOrUser, filePath, fileName) {
-    const userId = typeof targetOrUser === 'object' ? targetOrUser.userKey : targetOrUser;
+    const outbound = resolveFeishuReceiveTarget(targetOrUser);
     const fs = await import('fs');
 
     if (!fs.existsSync(filePath)) {
@@ -368,16 +439,16 @@ export class FeishuAdapter extends ChannelAdapter {
       }
     });
 
-    const fileKey = res?.data?.file_key;
+    const fileKey = res?.data?.file_key || res?.file_key;
     if (!fileKey) {
-      console.error('[Feishu] File upload returned no file_key:', { filePath, response: res });
+      console.error('[Feishu] File upload returned no file_key:', { filePath, response: JSON.stringify(res) });
       throw new Error(`文件上传失败，飞书未返回 file_key: ${filePath}`);
     }
 
     await this.client.im.message.create({
-      params: { receive_id_type: 'open_id' },
+      params: { receive_id_type: outbound.receiveIdType },
       data: {
-        receive_id: userId,
+        receive_id: outbound.receiveId,
         msg_type: 'file',
         content: JSON.stringify({ file_key: fileKey })
       }

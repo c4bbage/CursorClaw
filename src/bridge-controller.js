@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'fs';
 import { AppResponseAccumulator } from './app-commands.js';
 import { AppCommandExecutor, composeFinalText } from './app-command-executor.js';
+import { SessionStore } from './session-store.js';
 import {
   buildAskQuestionResponse,
   buildCreatePlanResponse,
@@ -23,7 +24,7 @@ export const BOT_COMMANDS = [
 ];
 
 export class BridgeController {
-  constructor({ channelAdapter, cursorSessions, scheduler, elevenLabs }) {
+  constructor({ channelAdapter, cursorSessions, scheduler, elevenLabs, stateDir }) {
     this.channelAdapter = channelAdapter;
     this.cursorSessions = cursorSessions;
     this.scheduler = scheduler;
@@ -36,6 +37,7 @@ export class BridgeController {
       cursorSessions,
       channelAdapter
     });
+    this.sessionStore = stateDir ? new SessionStore(stateDir) : null;
   }
 
   attach() {
@@ -398,6 +400,87 @@ export class BridgeController {
         console.error(`[Bridge] Failed to send startup greeting to ${target.conversationKey}:`, err.message);
       }
     }
+  }
+
+  saveState() {
+    if (!this.sessionStore) return;
+
+    const sessions = [];
+    for (const [scopeKey, session] of this.cursorSessions.sessions) {
+      sessions.push({
+        scopeKey,
+        sessionId: session.bridge?.sessionId || null,
+        createdAt: session.createdAt,
+        lastUsedAt: session.lastUsedAt
+      });
+    }
+
+    const state = {
+      sessions,
+      targets: Object.fromEntries(this.latestTargets),
+      pendingInteractions: Object.fromEntries(this.pendingInteractions),
+      voiceMode: Object.fromEntries(this.voiceMode),
+      scheduledTasks: this.appCommandExecutor.getTaskDefinitions()
+    };
+
+    this.sessionStore.save(state);
+  }
+
+  async restoreState() {
+    if (!this.sessionStore) return;
+
+    const state = this.sessionStore.load();
+    if (!state) {
+      console.log('[Bridge] No saved state to restore.');
+      return;
+    }
+
+    for (const [scopeKey, target] of Object.entries(state.targets || {})) {
+      this.latestTargets.set(scopeKey, target);
+    }
+
+    for (const [scopeKey, enabled] of Object.entries(state.voiceMode || {})) {
+      this.voiceMode.set(scopeKey, enabled);
+    }
+
+    if (state.scheduledTasks?.length > 0) {
+      this.appCommandExecutor.restoreTasks(state.scheduledTasks);
+    }
+
+    const restoredScopes = new Set();
+
+    for (const [scopeKey, interaction] of Object.entries(state.pendingInteractions || {})) {
+      const target = this.latestTargets.get(scopeKey);
+      if (target) {
+        this.pendingInteractions.set(scopeKey, interaction);
+        restoredScopes.add(scopeKey);
+        const label = interaction.method === 'cursor/ask_question' ? '问题' : '计划确认';
+        const original = interaction.method === 'cursor/ask_question'
+          ? formatAskQuestionMessage(interaction.params)
+          : formatCreatePlanMessage(interaction.params);
+        await this.channelAdapter.sendText(target,
+          `🔄 重启恢复 — 以下${label}仍需回复：\n\n${original}`
+        ).catch((err) => console.error('[Bridge] Restore notify failed:', err.message));
+      }
+    }
+
+    for (const session of state.sessions || []) {
+      if (restoredScopes.has(session.scopeKey)) continue;
+      const target = this.latestTargets.get(session.scopeKey);
+      if (target) {
+        await this.channelAdapter.sendText(target,
+          '🔄 桥接已重启。之前的对话上下文已丢失，但记忆文件仍然保留。发新消息继续。'
+        ).catch((err) => console.error('[Bridge] Restart notify failed:', err.message));
+      }
+    }
+
+    console.log('[Bridge] State restored:', {
+      targets: this.latestTargets.size,
+      pendingInteractions: this.pendingInteractions.size,
+      voiceModes: this.voiceMode.size,
+      scheduledTasks: state.scheduledTasks?.length ?? 0,
+      notifiedUsers: state.sessions?.length ?? 0
+    });
   }
 
   _maybeSendVoice(message, text) {

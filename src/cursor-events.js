@@ -172,8 +172,28 @@ export function buildCreatePlanResponse(text) {
   throw new Error('无法识别计划审批结果，请回复“批准”或“拒绝”。');
 }
 
+function extractTodos(params) {
+  const candidates = [
+    params?.todos,
+    params?.items,
+    params?.entries,
+    params?.todo_list,
+    params?.value?.todos,
+    params?.update?.todos,
+    params?.args?.todos
+  ];
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) {
+      return candidate;
+    }
+  }
+
+  return [];
+}
+
 export function formatTodosMessage(params) {
-  const todos = Array.isArray(params?.todos) ? params.todos : [];
+  const todos = extractTodos(params);
   if (todos.length === 0) {
     return 'Cursor 更新了待办事项。';
   }

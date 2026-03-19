@@ -22,6 +22,8 @@
 !src/elevenlabs.js
 !src/hook-runner.js
 !src/task-scheduler.js
+!src/session-store.js
+!src/file-staging.js
 !test/
 !test/app-commands.test.js
 !test/app-command-executor.test.js
@@ -30,6 +32,7 @@
 !test/cursor-events.test.js
 !test/cursor-session-manager.test.js
 !test/bugfix-improvements.test.js
+!test/session-store.test.js
 !docs/
 !docs/*.md
 !docs/images/
@@ -49,10 +52,11 @@
 !memory/.gitkeep
 memory/*.md
 !memory/MEMORY.md
-
+docs/
 .env
 .env.*
 !.env.example
 
 .DS_Store
 *.log
+docs/cursorclaw-why.md
