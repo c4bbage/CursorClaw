@@ -8,6 +8,7 @@ export class CursorSessionManager extends EventEmitter {
     this.cwd = options.cwd || process.cwd();
     this.mcpServers = options.mcpServers;
     this.model = options.model || null;
+    this.promptTimeoutMs = options.promptTimeoutMs || undefined;
     this.hookRunner = options.hookRunner !== false ? new HookRunner({ projectDir: this.cwd }) : null;
     this.bridgeFactory = options.bridgeFactory || ((bridgeOptions) => new CursorBridge(bridgeOptions));
     this.sessions = new Map();
@@ -42,6 +43,7 @@ export class CursorSessionManager extends EventEmitter {
       cwd: this.cwd,
       mcpServers: this.mcpServers,
       model: this.model,
+      promptTimeoutMs: this.promptTimeoutMs,
       hookRunner: this.hookRunner,
       clientInfo: {
         name: `channel-bridge:${scopeKey}`,

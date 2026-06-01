@@ -3,7 +3,7 @@ import { EventEmitter } from 'events';
 import readline from 'readline';
 import { APP_COMMANDS_INSTRUCTIONS } from './app-commands.js';
 
-const DEFAULT_PROMPT_TIMEOUT_MS = 5 * 60 * 1000;
+const DEFAULT_PROMPT_TIMEOUT_MS = 15 * 60 * 1000;
 
 const SHELL_TOOLS = new Set(['Shell', 'shell']);
 const READ_TOOLS = new Set(['Read', 'read', 'Glob', 'Grep', 'SemanticSearch']);
@@ -174,9 +174,9 @@ export class CursorBridge extends EventEmitter {
 
     if (updateType === 'tool_call') {
       this._flushThought();
-      const toolName = update.toolName || update.tool_name || update.name || update.tool?.name || '';
-      const toolInput = update.toolInput || update.tool_input || update.input || update.tool?.input || {};
-      console.log('[Cursor] Tool call:', toolName, 'keys:', Object.keys(update));
+      const toolName = this._extractToolName(update);
+      const toolInput = this._extractToolInput(update);
+      console.log('[Cursor] Tool call:', toolName, 'kind:', update.kind || '');
 
       if (this.activePrompt?.onToolStatus) {
         this.activePrompt.onToolStatus(toolName);
@@ -211,9 +211,10 @@ export class CursorBridge extends EventEmitter {
   // ── permission request → preToolUse / before* hooks ─────────────
 
   async _handlePermissionRequest(msg) {
-    const toolName = msg.params?.toolName || msg.params?.permissions?.[0]?.tool || '';
-    const toolInput = msg.params?.toolInput || msg.params?.permissions?.[0]?.input || {};
-    console.log('[Cursor] Permission request: id=', msg.id, 'tool=', toolName);
+    const tc = msg.params?.toolCall || {};
+    const toolName = this._extractToolName(tc);
+    const toolInput = this._extractToolInput(tc);
+    console.log('[Cursor] Permission request: id=', msg.id, 'tool=', toolName, 'kind=', tc.kind || '');
 
     if (!this.hookRunner) {
       this.respond(msg.id, { outcome: { outcome: 'selected', optionId: 'allow-once' } });
@@ -334,21 +335,85 @@ export class CursorBridge extends EventEmitter {
     }
   }
 
+  // ── ACP field extraction helpers ────────────────────────────────
+  // ACP tool_call and permission_request use: title, kind, rawInput
+  // (not toolName/toolInput). title is human-readable, kind is the
+  // tool category (edit/execute/etc), rawInput is a JSON string.
+
+  _extractToolName(update) {
+    if (update.toolName) return update.toolName;
+    if (update.tool_name) return update.tool_name;
+    const title = update.title || '';
+    const kind = update.kind || '';
+    if (kind === 'edit' && title) {
+      const m = title.match(/^(?:Write|Edit)\s+`?([^`]+)`?$/);
+      return m ? 'StrReplace' : 'Write';
+    }
+    if (kind === 'execute' && title) {
+      return 'Shell';
+    }
+    if (kind === 'read' || kind === 'search') {
+      return title.split(/\s/)[0] || 'Read';
+    }
+    if (kind === 'mcp') {
+      return title || 'MCP';
+    }
+    return title || kind || '';
+  }
+
+  _extractToolInput(update) {
+    if (update.toolInput) return update.toolInput;
+    if (update.tool_input) return update.tool_input;
+    const raw = update.rawInput;
+    if (typeof raw === 'string' && raw) {
+      try { return JSON.parse(raw); } catch { return { raw }; }
+    }
+    if (raw && typeof raw === 'object') return raw;
+    const content = update.content;
+    if (Array.isArray(content)) {
+      const diff = content.find(c => c.type === 'diff');
+      if (diff) return { path: diff.path, oldText: diff.oldText, newText: diff.newText };
+      const text = content.find(c => c.type === 'content');
+      if (text?.content?.text) return { command: text.content.text };
+    }
+    return {};
+  }
+
   // ── transport ───────────────────────────────────────────────────
+
+  _safeWrite(data) {
+    if (!this.process || !this.process.stdin || this.process.stdin.destroyed) {
+      console.warn('[Cursor] Cannot write — process stdin is closed');
+      return false;
+    }
+    try {
+      this.process.stdin.write(data);
+      return true;
+    } catch (err) {
+      if (err.code === 'EPIPE' || err.code === 'ERR_STREAM_DESTROYED') {
+        console.warn('[Cursor] Write failed (pipe closed):', err.code);
+        return false;
+      }
+      throw err;
+    }
+  }
 
   send(method, params) {
     const id = this.nextId++;
     console.log('[Cursor] Sending ACP request:', method, 'id=', id);
-    this.process.stdin.write(
+    const ok = this._safeWrite(
       JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n'
     );
+    if (!ok) {
+      return Promise.reject(new Error('ACP process stdin is closed'));
+    }
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
     });
   }
 
   respond(id, result) {
-    this.process.stdin.write(
+    this._safeWrite(
       JSON.stringify({ jsonrpc: '2.0', id, result }) + '\n'
     );
   }
@@ -526,7 +591,7 @@ ${message}`;
       return;
     }
     console.log('[Cursor] Sending session/cancel for session:', this.sessionId);
-    this.process.stdin.write(
+    this._safeWrite(
       JSON.stringify({
         jsonrpc: '2.0',
         id: this.nextId++,

@@ -218,7 +218,69 @@ The agent will read `~/my-app/.cursor/rules/`, use `~/my-app/memory/`, and execu
 
 Agent 会读取 `~/my-app/.cursor/rules/`，使用 `~/my-app/memory/`，并在 `~/my-app/` 中执行文件操作。
 
-### Step 5: Test / 测试
+### Step 5: Run with tmux (Recommended) / 使用 tmux 运行（推荐）
+
+For long-running sessions, use `tmux` to keep the bridge alive after closing the terminal.
+
+长时间运行建议用 `tmux`，关闭终端后 Bridge 仍然存活。
+
+**Basic / 基础**
+
+```bash
+# Start a named tmux session / 创建命名 tmux 会话
+tmux new-session -d -s claw \
+  "cd /path/to/CursorClaw && node telegram.js 2>&1 | tee /tmp/cursorclaw.log"
+```
+
+**With a different project directory / 指定其他项目目录**
+
+```bash
+# Bridge code in CursorClaw/, agent works in parent directory
+# Bridge 代码在 CursorClaw/，Agent 在上级目录工作
+tmux new-session -d -s claw \
+  "cd /path/to/CursorClaw && \
+   CURSOR_PROJECT_DIR=/path/to/your/project \
+   node telegram.js 2>&1 | tee /tmp/cursorclaw.log"
+```
+
+**Example: CursorClaw inside a monorepo / 例：CursorClaw 在 monorepo 内部**
+
+```bash
+# CursorClaw is at ~/project/CursorClaw
+# Agent should work in ~/project (the monorepo root)
+tmux new-session -d -s claw \
+  "cd ~/project/CursorClaw && \
+   CURSOR_PROJECT_DIR=~/project \
+   node telegram.js 2>&1 | tee /tmp/cursorclaw.log"
+```
+
+**Manage the session / 管理会话**
+
+```bash
+tmux attach -t claw        # Attach to view logs / 进入查看日志
+# Press Ctrl+B, then D     # Detach (keeps running) / 脱离（不关闭）
+tmux kill-session -t claw   # Stop the bridge / 停止
+```
+
+**Run both Feishu and Telegram / 同时运行飞书和 Telegram**
+
+```bash
+tmux new-session -d -s claw-tg "cd /path/to/CursorClaw && node telegram.js 2>&1 | tee /tmp/claw-tg.log"
+tmux new-session -d -s claw-fs "cd /path/to/CursorClaw && node feishu-cursor.js 2>&1 | tee /tmp/claw-fs.log"
+```
+
+> **Important / 重要**: Only one Telegram bot instance can run at a time. If you see `409 Conflict` errors, kill the old process first:
+>
+> 同一时间只能运行一个 Telegram bot 实例。如果看到 `409 Conflict` 错误，先杀掉旧进程：
+>
+> ```bash
+> tmux kill-session -t claw 2>/dev/null
+> pkill -f 'node.*telegram.js' 2>/dev/null
+> sleep 1
+> # Then start again / 然后重新启动
+> ```
+
+### Step 6: Test / 测试
 
 Send a message to your bot. The first message creates an ACP session (takes a few seconds), then you'll see streaming replies.
 

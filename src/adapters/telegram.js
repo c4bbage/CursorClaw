@@ -4,7 +4,7 @@ import { BOT_COMMANDS } from '../bridge-controller.js';
 import { buildFilePromptSection, stageInboundFile } from '../file-staging.js';
 
 const STREAM_UPDATE_INTERVAL_MS = 1200;
-const STREAM_MIN_DELTA_CHARS = 24;
+const STREAM_MIN_DELTA_CHARS = 0;
 const STREAM_PLACEHOLDER = '正在思考...';
 const STREAM_IN_PROGRESS_SUFFIX = '\n\n[生成中...]';
 const TELEGRAM_MESSAGE_LIMIT = 4096;
@@ -120,7 +120,9 @@ class TelegramStreamHandle {
     this.pendingText = text;
 
     if (!this.started) {
-      this.updateChain = this.updateChain.then(() => this.ensureStarted());
+      this.updateChain = this.updateChain
+        .then(() => this.ensureStarted())
+        .catch((err) => console.error('[Telegram] ensureStarted in push() failed:', err.message));
     }
 
     const delta = Math.abs(this.pendingText.length - this.lastRenderedText.length);

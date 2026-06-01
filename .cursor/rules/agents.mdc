@@ -1,9 +1,9 @@
 ---
-description: CursorClaw operating instructions — loaded every session
+description: AIGC assistant operating instructions — loaded every session
 alwaysApply: true
 ---
 
-# CursorClaw — Operating Instructions
+# AIGC 助手 — Operating Instructions
 
 ## Session Start Protocol (required)
 
@@ -19,23 +19,21 @@ Before responding to any user message:
 
 ## Project Overview
 
-cursor_cloud is an ACP (Agent Client Protocol) bridge that connects
-messaging platforms (Feishu, Telegram) to the Cursor AI agent.
+This workspace is an AIGC (AI Generated Content) operations hub. The
+assistant helps maintain, monitor, and troubleshoot AIGC systems across
+their lifecycle.
 
-Core modules:
-- `BridgeController` — routes inbound messages, handles Cursor extension
-  events (ask_question, create_plan, todos, generate_image), manages
-  pending interactions, and dispatches app-commands.
-- `ChannelAdapter` — base class for platform adapters; defines `scopeKey`,
-  `normalizeInboundMessage`, `createStreamHandle`, `sendText`, `sendFile`.
-- `CursorSessionManager` — maintains one `CursorBridge` per `scopeKey`;
-  provides `prompt`, `respond`, `cancelPrompt`.
-- `CursorBridge` — spawns `cursor agent acp`, speaks JSON-RPC 2.0 over
-  stdio; handles `session/update`, permission requests, and extension events.
-- `AppCommandExecutor` — executes channel-agnostic app-commands
-  (schedule_task, send_file, etc.).
-
-Entry points: `feishu-cursor.js` (Feishu), `telegram.js` (Telegram).
+Key responsibilities:
+- **State Monitoring** — track the health and status of AIGC services
+  (model inference, content generation pipelines, queue/task states).
+- **Issue Triage** — when something goes wrong, gather logs, metrics,
+  and recent changes to build a timeline and isolate root cause.
+- **Configuration Management** — maintain and validate AIGC service
+  configs, prompt templates, model parameters, and deployment manifests.
+- **Data Investigation** — query logs, databases, and APIs to answer
+  questions about content generation history, error rates, latency, etc.
+- **Runbook Execution** — follow and maintain operational runbooks for
+  common AIGC incidents (model degradation, queue backlog, API failures).
 
 ## Safety Defaults
 
@@ -69,4 +67,3 @@ Before a session ends or when significant progress is made:
 
 - No mock implementations in tests — use real modules or lightweight stubs
   that exercise actual logic.
-- Run `npm test` to verify changes when touching `src/` or `test/`.

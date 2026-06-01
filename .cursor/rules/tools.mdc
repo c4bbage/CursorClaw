@@ -1,53 +1,59 @@
 ---
-description: Tool and dependency conventions for this project
+description: Tool and dependency conventions for AIGC operations
 alwaysApply: false
 globs:
   - "src/**"
-  - "feishu-cursor.js"
-  - "telegram.js"
+  - "scripts/**"
+  - "config/**"
   - "package.json"
+  - "requirements*.txt"
+  - "pyproject.toml"
 ---
 
-# CursorClaw — Tools & Dependencies
+# AIGC 助手 — Tools & Dependencies
 
-## ACP JSON-RPC Gotchas
+## Log Investigation
 
-- `id` and `result` can be `0` or `null`. **Never use truthy checks**
-  (`if (id)` / `if (result)`). Use `!= null` or structural checks.
-- Cursor CLI extension methods come in two prefixes: `cursor/` and `_cursor/`.
-  Always match both; normalize `_cursor/` → `cursor/`.
-- Any incoming JSON-RPC request with an `id` that you don't handle must
-  still be acknowledged, otherwise the agent process hangs.
-- `session/update` has multiple subtypes: `agent_message_chunk`,
-  `agent_thought_chunk`, `tool_call`, `tool_call_update`. Cover all of them
-  (at minimum log unknowns) or tool-call phases become a black box.
-- Stream promise chains must have `.catch()` on every link. A missing catch
-  causes `finalize` to never execute.
-- `session/new` must not default `mcpServers: []` — omit the field entirely
-  when no MCP servers are configured.
+- Always start with timestamps and request/trace IDs to narrow scope.
+- Use `rg` (ripgrep) for fast log searching; avoid `grep` on large files.
+- When tailing live logs, capture to file for reproducible analysis.
+- Extract structured fields (JSON logs) with `jq` for filtering and
+  aggregation.
 
-## Feishu (Lark) SDK
+## API & Service Health
 
-- `@larksuiteoapi/node-sdk@^1.32.0` provides `client.im.message.update()`
-  for streaming reply updates on a single message.
-- Interactive card (`interactive` msg_type) schema has not been fully
-  validated in this project. On production errors, fall back to the stable
-  `post` message type.
+- Use `curl` or `httpie` for ad-hoc API health checks.
+- Check response codes, latency headers, and error payloads.
+- For model provider APIs, always check rate-limit headers
+  (`x-ratelimit-remaining`, `retry-after`).
 
-## Telegram Bot API
+## Database & Queue
 
-- `node-telegram-bot-api@^0.67.0` provides `sendMessage`,
-  `editMessageText`, `sendChatAction`, `getFileLink`.
-- Telegram message limit: 4096 chars. Use `splitMessage()` for long texts.
-- Use `markdownToTelegramHtml()` + `parse_mode: 'HTML'` for rich formatting;
-  fall back to plain text on parse errors.
+- Read-only queries for investigation — never mutate production data
+  without explicit user permission.
+- When querying metrics DBs (Prometheus, ClickHouse, etc.), prefer
+  time-bounded queries to avoid excessive load.
+- For message queues, check consumer group lag and dead-letter queues
+  as first diagnostic step.
 
-## Prompt Timeout
+## Configuration Management
 
-- Default ACP prompt timeout: 5 minutes (`DEFAULT_PROMPT_TIMEOUT_MS`).
-  On timeout, `cancelCurrentPrompt()` sends `session/cancel` and returns
-  the partial response accumulated so far.
+- Diff current config against last-known-good version before changes.
+- Validate prompt templates for variable completeness and format.
+- Track config changes in daily log with before/after snapshots.
 
-## Reference
+## Python
 
-Full debugging lessons: `docs/acp-bridge-lessons.md`.
+- Use `uv` for dependency management: `uv run`, `uv pip`.
+
+## Node.js
+
+- Use `npm` for package management.
+- Run `npm test` to verify changes when touching source or test files.
+
+## General
+
+- Prefer structured output (JSON, tables) over raw text for status
+  reports — easier to diff and track over time.
+- When running diagnostic scripts, always capture output to a file
+  for later reference.

@@ -3,7 +3,7 @@ description: Memory read/write protocol for cross-session continuity
 alwaysApply: true
 ---
 
-# CursorClaw — Memory Protocol
+# AIGC 助手 — Memory Protocol
 
 ## Directory Layout
 
@@ -15,10 +15,11 @@ memory/
 
 ## Long-Term Memory (`memory/MEMORY.md`)
 
-Stores durable facts: architecture decisions, project milestones, resolved
-bug classes, established conventions. This file is version-controlled and
-should stay under 200 lines. When it grows past that, consolidate stale
-entries or graduate them to docs.
+Stores durable facts: architecture decisions, AIGC system milestones,
+resolved issue classes, established conventions, service topology.
+This file is version-controlled and should stay under 200 lines.
+When it grows past that, consolidate stale entries or graduate them
+to docs.
 
 ## Daily Log (`memory/YYYY-MM-DD.md`)
 
@@ -49,10 +50,12 @@ If the `session-memory.sh` hook already injected this content via
 ## Write Protocol
 
 Capture to today's daily log when any of these occur:
-- A non-trivial bug is found or fixed.
+- An AIGC service issue is found or resolved.
+- A configuration change is made.
 - An architecture or design decision is made.
 - A new convention or constraint is established.
 - A user preference is expressed.
+- A notable state change in any monitored AIGC system.
 
 Update `memory/MEMORY.md` when a learning is broadly reusable across
 sessions (not just today's context).

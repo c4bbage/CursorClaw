@@ -2,24 +2,111 @@
   "version": 1,
   "hooks": {
     "sessionStart": [
-      { "command": ".cursor/hooks/log-event.sh" },
-      { "command": ".cursor/hooks/session-memory.sh" }
+      {
+        "command": ".cursor/hooks/log-event.sh"
+      },
+      {
+        "command": ".cursor/hooks/session-memory.sh"
+      },
+      {
+        "command": "node .cursor/xflow-observe/hooks/session-start.cjs",
+        "failClosed": false,
+        "_xflow_managed": true,
+        "_xflow_version": "1.0",
+        "_xflow_managed_module": "observe"
+      }
     ],
     "stop": [
-      { "command": ".cursor/hooks/harness-check.sh" },
-      { "command": ".cursor/hooks/session-summary.sh" }
+      {
+        "command": ".cursor/hooks/harness-check.sh"
+      },
+      {
+        "command": ".cursor/hooks/session-summary.sh"
+      }
     ],
     "sessionEnd": [
-      { "command": ".cursor/hooks/log-event.sh" }
+      {
+        "command": ".cursor/hooks/log-event.sh"
+      },
+      {
+        "command": "node .cursor/xflow-observe/hooks/session-end.cjs",
+        "failClosed": false,
+        "_xflow_managed": true,
+        "_xflow_version": "1.0",
+        "_xflow_managed_module": "observe"
+      }
     ],
     "afterAgentThought": [
-      { "command": ".cursor/hooks/log-event.sh" }
+      {
+        "command": ".cursor/hooks/log-event.sh"
+      }
     ],
     "afterAgentResponse": [
-      { "command": ".cursor/hooks/log-event.sh" }
+      {
+        "command": ".cursor/hooks/log-event.sh"
+      },
+      {
+        "command": "node .cursor/xflow-observe/hooks/after-agent-response.cjs",
+        "failClosed": false,
+        "_xflow_managed": true,
+        "_xflow_version": "1.0",
+        "_xflow_managed_module": "observe"
+      }
     ],
     "postToolUse": [
-      { "command": ".cursor/hooks/log-event.sh" }
+      {
+        "command": ".cursor/hooks/log-event.sh"
+      },
+      {
+        "command": "node .cursor/xflow-observe/hooks/post-tool-use.cjs",
+        "failClosed": false,
+        "_xflow_managed": true,
+        "_xflow_version": "1.0",
+        "_xflow_managed_module": "observe"
+      }
+    ],
+    "beforeSubmitPrompt": [
+      {
+        "command": "node .cursor/xflow-observe/hooks/before-submit-prompt.cjs",
+        "failClosed": false,
+        "_xflow_managed": true,
+        "_xflow_version": "1.0",
+        "_xflow_managed_module": "observe"
+      }
+    ],
+    "preToolUse": [
+      {
+        "command": "node .cursor/xflow-observe/hooks/pre-tool-use.cjs",
+        "failClosed": false,
+        "_xflow_managed": true,
+        "_xflow_version": "1.0",
+        "_xflow_managed_module": "observe"
+      },
+      {
+        "command": "node .cursor/xflow-protect/hooks/pre-tool-use.cjs",
+        "failClosed": false,
+        "_xflow_managed": true,
+        "_xflow_version": "1.0",
+        "_xflow_managed_module": "protect"
+      }
+    ],
+    "postToolUseFailure": [
+      {
+        "command": "node .cursor/xflow-observe/hooks/post-tool-use-failure.cjs",
+        "failClosed": false,
+        "_xflow_managed": true,
+        "_xflow_version": "1.0",
+        "_xflow_managed_module": "observe"
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": "node .cursor/xflow-protect/hooks/before-shell-execution.cjs",
+        "failClosed": false,
+        "_xflow_managed": true,
+        "_xflow_version": "1.0",
+        "_xflow_managed_module": "protect"
+      }
     ]
   }
 }

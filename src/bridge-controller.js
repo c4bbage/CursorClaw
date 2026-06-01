@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync } from 'fs';
 import { AppResponseAccumulator } from './app-commands.js';
 import { AppCommandExecutor, composeFinalText } from './app-command-executor.js';
 import { SessionStore } from './session-store.js';
@@ -32,6 +32,8 @@ export class BridgeController {
     this.pendingInteractions = new Map();
     this.latestTargets = new Map();
     this.voiceMode = new Map();
+    this.conversationLog = new Map();
+    this._autoSaveTimer = null;
     this.appCommandExecutor = new AppCommandExecutor({
       scheduler,
       cursorSessions,
@@ -89,6 +91,7 @@ export class BridgeController {
     const stream = this.channelAdapter.createStreamHandle(message);
     const accumulator = new AppResponseAccumulator();
     let lastToolName = '';
+    const toolsUsed = [];
 
     try {
       const { promptText, promptOptions } = await this.channelAdapter.resolvePromptInput(message);
@@ -102,6 +105,7 @@ export class BridgeController {
         onToolStatus: (toolName) => {
           if (toolName && toolName !== lastToolName) {
             lastToolName = toolName;
+            if (!toolsUsed.includes(toolName)) toolsUsed.push(toolName);
             const visibleSoFar = accumulator.getStreamingText();
             const indicator = `${visibleSoFar}\n\n⚙️ ${toolName}...`;
             stream.push(indicator);
@@ -130,6 +134,7 @@ export class BridgeController {
       await stream.finalize(finalText);
 
       this._maybeSendVoice(message, finalText);
+      this._recordExchange(message.scopeKey, message.text || '', finalText, toolsUsed);
     } catch (error) {
       console.error('[Bridge] Error:', { scopeKey: message.scopeKey, error });
       await stream.fail('处理失败: ' + error.message);
@@ -427,7 +432,8 @@ export class BridgeController {
       targets: Object.fromEntries(this.latestTargets),
       pendingInteractions: Object.fromEntries(this.pendingInteractions),
       voiceMode: Object.fromEntries(this.voiceMode),
-      scheduledTasks: this.appCommandExecutor.getTaskDefinitions()
+      scheduledTasks: this.appCommandExecutor.getTaskDefinitions(),
+      conversationLog: Object.fromEntries(this.conversationLog)
     };
 
     this.sessionStore.save(state);
@@ -449,6 +455,15 @@ export class BridgeController {
     for (const [scopeKey, enabled] of Object.entries(state.voiceMode || {})) {
       this.voiceMode.set(scopeKey, enabled);
     }
+
+    if (state.conversationLog) {
+      for (const [scopeKey, entries] of Object.entries(state.conversationLog)) {
+        if (Array.isArray(entries)) {
+          this.conversationLog.set(scopeKey, entries.slice(-10));
+        }
+      }
+    }
+    this._flushConversationToDailyLog();
 
     if (state.scheduledTasks?.length > 0) {
       this.appCommandExecutor.restoreTasks(state.scheduledTasks);
@@ -475,11 +490,22 @@ export class BridgeController {
       if (restoredScopes.has(session.scopeKey)) continue;
       const target = this.latestTargets.get(session.scopeKey);
       if (target) {
-        await this.channelAdapter.sendText(target,
-          '🔄 桥接已重启。之前的对话上下文已丢失，但记忆文件仍然保留。发新消息继续。'
+        const recent = this.conversationLog.get(session.scopeKey) || [];
+        let restartMsg = '🔄 桥接已重启。';
+        if (recent.length > 0) {
+          const last = recent[recent.length - 1];
+          restartMsg += `\n\n📝 对话摘要已写入日志，新会话将自动获取上下文。`;
+          restartMsg += `\n最近话题：${last.user}`;
+        } else {
+          restartMsg += '之前的对话上下文已丢失，但记忆文件仍然保留。';
+        }
+        restartMsg += '\n\n发新消息继续。';
+        await this.channelAdapter.sendText(target, restartMsg
         ).catch((err) => console.error('[Bridge] Restart notify failed:', err.message));
       }
     }
+
+    this.conversationLog.clear();
 
     console.log('[Bridge] State restored:', {
       targets: this.latestTargets.size,
@@ -514,5 +540,90 @@ export class BridgeController {
       .catch((err) => {
         console.error('[Bridge] TTS/send audio failed:', err.message);
       });
+  }
+
+  _recordExchange(scopeKey, userPrompt, responseText, toolsUsed = []) {
+    const entry = {
+      ts: new Date().toISOString(),
+      user: (userPrompt || '').slice(0, 100),
+      response: this._previewResponse(responseText, 200),
+      tools: toolsUsed
+    };
+
+    if (!this.conversationLog.has(scopeKey)) {
+      this.conversationLog.set(scopeKey, []);
+    }
+    const buffer = this.conversationLog.get(scopeKey);
+    buffer.push(entry);
+    if (buffer.length > 10) buffer.shift();
+
+    this._debouncedSave();
+  }
+
+  _previewResponse(text, maxLen) {
+    if (!text) return '';
+    return text
+      .replace(/```[\s\S]*?```/g, '[code]')
+      .replace(/[#*_~>|]/g, '')
+      .trim()
+      .slice(0, maxLen);
+  }
+
+  _debouncedSave() {
+    if (this._autoSaveTimer) return;
+    this._autoSaveTimer = setTimeout(() => {
+      this._autoSaveTimer = null;
+      try {
+        this.saveState();
+      } catch (err) {
+        console.error('[Bridge] Auto-save failed:', err.message);
+      }
+    }, 2000);
+  }
+
+  _flushConversationToDailyLog() {
+    const projectDir = this.cursorSessions.cwd || process.cwd();
+    const memoryDir = `${projectDir}/memory`;
+    const today = new Date().toISOString().slice(0, 10);
+    const dailyPath = `${memoryDir}/${today}.md`;
+
+    let allEntries = [];
+    for (const [scopeKey, exchanges] of this.conversationLog) {
+      const shortScope = scopeKey.split(':').pop() || scopeKey;
+      for (const e of exchanges) {
+        allEntries.push({ ...e, scope: shortScope });
+      }
+    }
+
+    if (allEntries.length === 0) return;
+
+    allEntries.sort((a, b) => a.ts.localeCompare(b.ts));
+    allEntries = allEntries.slice(-10);
+
+    const now = new Date().toTimeString().slice(0, 5);
+    const lines = [
+      '',
+      `## ${now} Restored conversation context`,
+    ];
+
+    for (const e of allEntries) {
+      const time = e.ts.slice(11, 16);
+      lines.push(`- ${time} User: ${e.user}`);
+      lines.push(`  Ala: ${e.response}`);
+      if (e.tools?.length) {
+        lines.push(`  Tools: ${e.tools.join(', ')}`);
+      }
+    }
+    lines.push('');
+
+    if (!existsSync(memoryDir)) {
+      mkdirSync(memoryDir, { recursive: true });
+    }
+    if (!existsSync(dailyPath)) {
+      writeFileSync(dailyPath, `# ${today}\n`, 'utf-8');
+    }
+
+    appendFileSync(dailyPath, lines.join('\n') + '\n', 'utf-8');
+    console.log(`[Bridge] Flushed ${allEntries.length} conversation entries to daily log`);
   }
 }

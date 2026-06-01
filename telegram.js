@@ -22,9 +22,14 @@ const telegram = new TelegramAdapter({
   workspaceDir: projectDir
 });
 
+const promptTimeoutMs = process.env.CURSOR_PROMPT_TIMEOUT_MS
+  ? parseInt(process.env.CURSOR_PROMPT_TIMEOUT_MS, 10)
+  : undefined;
+
 const cursorSessions = new CursorSessionManager({
   cwd: projectDir,
-  model: process.env.CURSOR_MODEL || null
+  model: process.env.CURSOR_MODEL || null,
+  promptTimeoutMs
 });
 const scheduler = new TaskScheduler();
 const controller = new BridgeController({

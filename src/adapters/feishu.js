@@ -7,6 +7,10 @@ const STREAM_MIN_DELTA_CHARS = 24;
 const STREAM_PLACEHOLDER = '正在思考...';
 const STREAM_IN_PROGRESS_SUFFIX = '\n\n[生成中...]';
 
+function collapseBlankLines(text) {
+  return text.replace(/\n{3,}/g, '\n\n');
+}
+
 function resolveFeishuReceiveTarget(targetOrUser) {
   if (typeof targetOrUser !== 'object' || !targetOrUser) {
     return { receiveIdType: 'open_id', receiveId: targetOrUser };
@@ -55,7 +59,9 @@ class FeishuStreamHandle {
     this.pendingText = text;
 
     if (!this.started) {
-      this.updateChain = this.updateChain.then(() => this.ensureStarted());
+      this.updateChain = this.updateChain
+        .then(() => this.ensureStarted())
+        .catch((err) => console.error('[Feishu] ensureStarted in push() failed:', err.message));
     }
 
     const delta = Math.abs(this.pendingText.length - this.lastRenderedText.length);
@@ -79,7 +85,7 @@ class FeishuStreamHandle {
       this.timer = null;
     }
 
-    const baseText = this.pendingText.trim() || STREAM_PLACEHOLDER;
+    const baseText = collapseBlankLines(this.pendingText.trim()) || STREAM_PLACEHOLDER;
     const nextText = final ? baseText : `${baseText}${STREAM_IN_PROGRESS_SUFFIX}`;
 
     if (!final && nextText === this.lastRenderedText) {
@@ -456,11 +462,12 @@ export class FeishuAdapter extends ChannelAdapter {
   }
 
   buildMessagePayload(content) {
+    const cleaned = collapseBlankLines(content);
     return {
       content: JSON.stringify({
         zh_cn: {
           title: '',
-          content: [[{ tag: 'text', text: content }]]
+          content: [[{ tag: 'text', text: cleaned }]]
         }
       }),
       msg_type: 'post'

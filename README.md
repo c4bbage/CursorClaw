@@ -117,6 +117,32 @@ npm run start:telegram
 npm start & npm run start:telegram
 ```
 
+### Run with tmux (Recommended for Production) / 使用 tmux 运行（推荐）
+
+```bash
+# Start in background with logging / 后台启动 + 日志
+tmux new-session -d -s claw \
+  "cd /path/to/CursorClaw && node telegram.js 2>&1 | tee /tmp/cursorclaw.log"
+
+# Agent works in a different project directory / Agent 在其他项目目录工作
+tmux new-session -d -s claw \
+  "cd /path/to/CursorClaw && \
+   CURSOR_PROJECT_DIR=/path/to/your/project \
+   node telegram.js 2>&1 | tee /tmp/cursorclaw.log"
+
+# Manage / 管理
+tmux attach -t claw         # View logs / 查看日志 (Ctrl+B, D to detach / 脱离)
+tmux kill-session -t claw    # Stop / 停止
+```
+
+> **Note**: The Bridge reads `.env` and `node_modules` from its own directory, but the `agent acp` process works in `CURSOR_PROJECT_DIR` — reading rules, memory, and hooks from there.
+>
+> Bridge 从自身目录读取 `.env` 和 `node_modules`，但 `agent acp` 进程工作在 `CURSOR_PROJECT_DIR`——从那里读取规则、记忆和 hooks。
+
+See [Quickstart](docs/cursorclaw-quickstart.md) for more examples (monorepo, dual channel, troubleshooting).
+
+详见 [快速上手](docs/cursorclaw-quickstart.md) 获取更多示例（monorepo、双通道、问题排查）。
+
 ---
 
 ## Architecture / 架构
