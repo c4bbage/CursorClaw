@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, readdirSync, unlinkSync } from 'fs';
 import { AppResponseAccumulator } from './app-commands.js';
 import { AppCommandExecutor, composeFinalText } from './app-command-executor.js';
 import { SessionStore } from './session-store.js';
@@ -545,8 +545,8 @@ export class BridgeController {
   _recordExchange(scopeKey, userPrompt, responseText, toolsUsed = []) {
     const entry = {
       ts: new Date().toISOString(),
-      user: (userPrompt || '').slice(0, 100),
-      response: this._previewResponse(responseText, 200),
+      user: (userPrompt || '').slice(0, 200),
+      response: this._previewResponse(responseText, 500),
       tools: toolsUsed
     };
 
@@ -598,7 +598,18 @@ export class BridgeController {
     if (allEntries.length === 0) return;
 
     allEntries.sort((a, b) => a.ts.localeCompare(b.ts));
-    allEntries = allEntries.slice(-10);
+
+    const perScopeLimit = 5;
+    const scopeCounts = new Map();
+    const kept = [];
+    for (let i = allEntries.length - 1; i >= 0; i--) {
+      const s = allEntries[i].scope;
+      const count = scopeCounts.get(s) || 0;
+      if (count < perScopeLimit) {
+        kept.unshift(allEntries[i]);
+        scopeCounts.set(s, count + 1);
+      }
+    }
 
     const now = new Date().toTimeString().slice(0, 5);
     const lines = [
@@ -606,10 +617,10 @@ export class BridgeController {
       `## ${now} Restored conversation context`,
     ];
 
-    for (const e of allEntries) {
+    for (const e of kept) {
       const time = e.ts.slice(11, 16);
-      lines.push(`- ${time} User: ${e.user}`);
-      lines.push(`  Ala: ${e.response}`);
+      lines.push(`- ${time} [${e.scope}] User: ${e.user}`);
+      lines.push(`  Assistant: ${e.response}`);
       if (e.tools?.length) {
         lines.push(`  Tools: ${e.tools.join(', ')}`);
       }
@@ -624,6 +635,27 @@ export class BridgeController {
     }
 
     appendFileSync(dailyPath, lines.join('\n') + '\n', 'utf-8');
-    console.log(`[Bridge] Flushed ${allEntries.length} conversation entries to daily log`);
+    console.log(`[Bridge] Flushed ${kept.length} conversation entries to daily log`);
+
+    this._rotateDailyLogs(memoryDir, 7);
+  }
+
+  _rotateDailyLogs(memoryDir, retainDays) {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - retainDays);
+    const cutoffStr = cutoff.toISOString().slice(0, 10);
+
+    try {
+      const files = readdirSync(memoryDir);
+      for (const f of files) {
+        const match = f.match(/^(\d{4}-\d{2}-\d{2})\.md$/);
+        if (match && match[1] < cutoffStr) {
+          unlinkSync(`${memoryDir}/${f}`);
+          console.log(`[Bridge] Rotated old daily log: ${f}`);
+        }
+      }
+    } catch (err) {
+      console.error('[Bridge] Daily log rotation failed:', err.message);
+    }
   }
 }
